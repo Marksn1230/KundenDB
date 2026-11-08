@@ -1,0 +1,14 @@
+{
+  "scripts": {
+    "app:install": "npm --prefix kundenverwaltung/kundenverwaltung ci",
+    "setup": "npm --prefix kundenverwaltung/kundenverwaltung run setup",
+    "dev": "npm --prefix kundenverwaltung/kundenverwaltung run dev",
+    "build": "npm --prefix kundenverwaltung/kundenverwaltung run build",
+    "start": "npm --prefix kundenverwaltung/kundenverwaltung run start",
+    "test": "npm --prefix kundenverwaltung/kundenverwaltung test",
+    "dev:full": "npm --prefix kundenverwaltung/kundenverwaltung run dev:full"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.119.0"
+  }
+}

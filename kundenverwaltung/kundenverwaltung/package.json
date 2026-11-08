@@ -1,0 +1,59 @@
+{
+  "name": "kundenverwaltung",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1",
+    "build": "next build",
+    "start": "next start --hostname 127.0.0.1",
+    "lint": "eslint",
+    "check": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "test:integration": "tsx --test tests/api.test.ts",
+    "setup": "node scripts/setup.mjs",
+    "migrate": "node --env-file-if-exists=.env --import tsx scripts/migrate.ts",
+    "worker": "node --env-file-if-exists=.env --import tsx scripts/worker.ts",
+    "seed:demo": "node --env-file-if-exists=.env --import tsx scripts/seed.ts --fictional-only",
+    "api:export": "node --import tsx scripts/export-api.ts",
+    "dev:full": "node scripts/dev-local.mjs",
+    "migrate:sqlite-to-postgres": "node --env-file-if-exists=.env --import tsx scripts/migrate-sqlite-to-postgres.ts",
+    "snapshot:sqlite": "node --env-file-if-exists=.env --import tsx scripts/snapshot-sqlite.ts"
+  },
+  "dependencies": {
+    "csv-parse": "^7.0.3",
+    "exceljs": "^4.4.0",
+    "jose": "^6.2.16",
+    "libphonenumber-js": "^1.13.15",
+    "lucide-react": "^1.70.0",
+    "next": "16.4.5",
+    "openid-client": "^6.8.9",
+    "pg": "^8.23.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@apidevtools/swagger-parser": "^13.1.0",
+    "@electric-sql/pglite": "^0.5.15",
+    "@tailwindcss/turbopack": "^4",
+    "@types/node": "^20",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.5",
+    "playwright": "^1.65.0",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.15",
+    "typescript": "^5"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "11.1.1"
+    },
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "11.0.1"
+    }
+  }
+}

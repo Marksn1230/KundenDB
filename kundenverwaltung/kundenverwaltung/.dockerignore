@@ -1,0 +1,14 @@
+node_modules
+.next
+.env
+.env.*
+data
+.test-data
+.git
+test-results
+
+.runtime
+.next-dev
+.next-verify
+backups
+transfer

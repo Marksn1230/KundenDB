@@ -1,0 +1,40 @@
+import {chromium} from 'playwright';
+import {readFileSync,existsSync,mkdirSync} from 'node:fs';
+import {randomBytes,createHmac} from 'node:crypto';
+import {DatabaseSync} from 'node:sqlite';
+import path from 'node:path';import assert from 'node:assert/strict';
+const config={};for(const line of readFileSync('.env','utf8').split(/\r?\n/)){const m=line.match(/^([A-Z_]+)=(.*)$/);if(m)config[m[1]]=m[2].trim();}
+async function json(url,options){const r=await fetch(url,{...options,signal:AbortSignal.timeout(20000)});if(!r.ok)throw new Error('HTTP '+r.status+' bei '+new URL(url).pathname);return r.status===204?null:r.json();}
+const root=config.OIDC_INTERNAL_URL;
+const token=await json(root+'/realms/master/protocol/openid-connect/token',{method:'POST',body:new URLSearchParams({grant_type:'password',client_id:'admin-cli',username:config.KEYCLOAK_ADMIN_USER,password:config.KEYCLOAK_ADMIN_PASSWORD})});
+const admin=async(resource,method='GET',body)=>{const r=await fetch(config.OIDC_ADMIN_URL+resource,{method,headers:{Authorization:'Bearer '+token.access_token,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});if(!r.ok)throw new Error('Admin-Aktion '+method+' '+resource.split('?')[0]+' HTTP '+r.status);return r;};
+const prefix='local-verification-'+randomBytes(6).toString('hex'),password=randomBytes(24).toString('base64url'),ownPassword=randomBytes(24).toString('base64url'),resetPassword=randomBytes(24).toString('base64url'),newPassword=randomBytes(24).toString('base64url');let id,managedId,browser;
+function totp(secret){const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';let bits='';for(const c of secret.toUpperCase().replace(/[^A-Z2-7]/g,''))bits+=alphabet.indexOf(c).toString(2).padStart(5,'0');const bytes=[];for(let i=0;i+8<=bits.length;i+=8)bytes.push(parseInt(bits.slice(i,i+8),2));const counter=Buffer.alloc(8);counter.writeBigUInt64BE(BigInt(Math.floor(Date.now()/30000)));const mac=createHmac('sha256',Buffer.from(bytes)).update(counter).digest(),offset=mac.at(-1)&15;return String((mac.readUInt32BE(offset)&0x7fffffff)%1000000).padStart(6,'0');}
+async function loginForm(page,user,pass){await page.locator('#username').waitFor();await page.locator('#username').fill(user);await page.locator('#password').fill(pass);await page.locator('#kc-login').click();}
+async function changePassword(page,password){await page.locator('#password-new').waitFor();await page.locator('#password-new').fill(password);await page.locator('#password-confirm').fill(password);await page.locator('input[type=submit],button[type=submit]').first().click();}
+async function setupOtp(page){if(await page.locator('#mode-manual').count())await page.locator('#mode-manual').click();const node=page.locator('#kc-totp-secret-key');await node.waitFor();const secret=await node.textContent();if(await page.locator('#userLabel').count())await page.locator('#userLabel').fill('Automatische lokale Prüfung');await page.locator('#totp').fill(totp(secret));await page.locator('input[type=submit],button[type=submit]').first().click();return secret;}
+async function call(page,resource,body){return page.evaluate(async({resource,body})=>{const me=await(await fetch('/api/v1/me')).json();const r=await fetch('/api/v1/'+resource,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',...(body?{'X-CSRF-Token':me.user.csrf}:{})},body:body?JSON.stringify(body):undefined});return{status:r.status,data:await r.json()};},{resource,body});}
+try{
+ await admin('/users','POST',{username:prefix,firstName:'Technische Prüfung',enabled:true,requiredActions:['CONFIGURE_TOTP'],credentials:[{type:'password',value:password,temporary:false}]});
+ id=(await(await admin('/users?exact=true&username='+prefix)).json())[0].id;const role=await(await admin('/roles/administrator')).json();await admin('/users/'+id+'/role-mappings/realm','POST',[role]);
+ browser=await chromium.launch({headless:true,executablePath:existsSync('C:/Program Files/Google/Chrome/Application/chrome.exe')?'C:/Program Files/Google/Chrome/Application/chrome.exe':undefined});
+ const page=await browser.newPage({viewport:{width:1440,height:1000}});page.setDefaultTimeout(20000);let premature=false;
+ page.on('request',r=>{if(r.url().includes('/api/v1/customers')&&!r.headers().cookie?.includes('kr_session='))premature=true;});
+ await page.goto(config.APP_URL+'/kunden?provider=Art');await page.locator('#username').waitFor();assert.equal(new URL(page.url()).origin,config.APP_URL);assert.ok(await page.locator('.login-story').count());assert.equal(premature,false);
+ mkdirSync('test-results',{recursive:true});await page.screenshot({path:'test-results/login-integrated-desktop.png',fullPage:true});
+ await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:'test-results/login-integrated-mobile.png',fullPage:true});await page.setViewportSize({width:1440,height:1000});
+ await loginForm(page,prefix,password);await setupOtp(page);await page.getByRole('heading',{name:'Deine Kunden.'}).waitFor();assert.equal(new URL(page.url()).pathname,'/kunden');assert.equal(new URL(page.url()).search,'?provider=Art');assert.equal((await call(page,'me')).data.user.role,'admin');
+ const created=await call(page,'users',{action:'create',username:prefix+'.managed',role:'employee',password});assert.equal(created.status,200);managedId=created.data.subject;assert.equal(JSON.stringify(created.data).includes(password),false);
+ const ctx=await browser.newContext(),employee=await ctx.newPage();employee.setDefaultTimeout(20000);await employee.goto(config.APP_URL+'/reports');await loginForm(employee,prefix+'.managed',password);const secret=await setupOtp(employee);await changePassword(employee,ownPassword);await employee.getByRole('heading',{name:'Zahlen, die weiterhelfen.'}).waitFor();assert.equal((await call(employee,'me')).data.user.role,'employee');assert.equal((await call(employee,'settings')).status,403);
+ const reset=await call(page,'users',{action:'reset',subject:managedId,password:resetPassword});assert.equal(reset.status,200);assert.equal((await call(employee,'customers')).status,401);
+ const fresh=await browser.newContext(),again=await fresh.newPage();again.setDefaultTimeout(20000);await again.goto(config.APP_URL+'/reports');await loginForm(again,prefix+'.managed',resetPassword);
+ // The fixed password+OTP flow challenges existing OTP before the required password change.
+ await again.locator('#otp,#password-new').first().waitFor();if(await again.locator('#otp').count()){await new Promise(r=>setTimeout(r,30500-Date.now()%30000));await again.locator('#otp').fill(totp(secret));await again.locator('input[type=submit],button[type=submit]').first().click();}
+ await changePassword(again,newPassword);await again.getByRole('heading',{name:'Zahlen, die weiterhelfen.'}).waitFor();assert.equal((await call(again,'me')).data.user.role,'employee');
+ console.log('LIVE OK: integriertes Login Desktop/Smartphone; keine Kundendaten vor Anmeldung; Passwort + verpflichtende OTP; geschützter Link mit Filtern wiederhergestellt.');
+ console.log('LIVE OK: Admin legt temporären Mitarbeiterzugang über echte API an; Passwortwechsel und MFA; Reset widerruft Sitzung und erzwingt erneuten Wechsel bei erhaltenem OTP; Mitarbeiterrechte geprüft.');
+}catch(error){if(browser){for(const context of browser.contexts())for(const page of context.pages()){console.log('Browser-Prüfstand:',new URL(page.url()).pathname,await page.locator('h1,h2,#input-error,.alert-error').allTextContents());}}throw error;}finally{
+ if(browser)await browser.close();
+ for(const subject of [managedId,id])if(subject){await admin('/users/'+subject,'DELETE');const db=new DatabaseSync(path.resolve(config.DATABASE_PATH||'data/kunden.sqlite'));db.exec('PRAGMA busy_timeout=5000');db.prepare('DELETE FROM web_sessions WHERE subject=?').run(subject);db.prepare('DELETE FROM principals WHERE subject=?').run(subject);db.close();}
+ console.log('Nur kurzlebige Prüflogins entfernt; vorhandene persönliche Konten und Kundendaten unverändert.');
+}
