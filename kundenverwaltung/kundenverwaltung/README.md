@@ -1,5 +1,7 @@
 # Kundenraum
 
+[Vollständige Installation auf einem neuen Linux-Server: GitHub, PostgreSQL, HTTPS und erster Login](docs/server-installation.md).
+
 Deutschsprachige Kundenverwaltung mit Next.js 16.4.5, TypeScript, OIDC/Keycloak, gemeinsamen CSV-/XLSX-Importen, Reports und optionalen WhatsApp-/Telegram-Nachrichten. Der vorhandene Stack wurde weiterverwendet. Lokal bleiben bestehende SQLite-Daten erhalten; für den Linux-Server gibt es PostgreSQL und eine kontrollierte Übernahme. Weboberfläche und /api/v1 nutzen dieselben Geschäftsregeln.
 
 ## Lokal unter Windows starten
