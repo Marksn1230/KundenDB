@@ -1,3 +1,4 @@
 ﻿Name;MAC-Adresse;Serviceende;Telefon;Adresse;PLZ;Anbieter;Paket;Benutzerzuordnung;Punkte;Servicebeginn;Zahlungsfälligkeit;Zahlungsstatus;Kommentar;MAC-Format
 demo.alpen;02:00:00:AA:00:01;28.02.2027;0676 1234567;Fiktive Adresse;00123;Art;1;Marko;1,5;31.01.2027;31.01.2027;Unbezahlt;Fiktives Beispiel ohne Versandeinwilligung;MAC
 demo.konto;Service.Alpha;31.12.2027;;;01234;2GO;12;Mirko;12;31.12.2026;31.12.2026;Unbekannt;Freie Kennung bleibt unverändert;Kennung
+demo.ohneDatum;Service.OhneDatum;;;;;;;;;;;Unbekannt;Serviceende fehlt – später ergänzen;Kennung

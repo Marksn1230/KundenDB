@@ -5,7 +5,7 @@ import type {Payment} from '@/lib/domain';
 export const fmt=(date:string|null|undefined)=>date?date.split('-').reverse().join('.'):'—';
 export function Badge({children,tone='neutral'}:{children:ReactNode;tone?:string}){return <span className={'badge '+tone}><span className="badge-dot"/>{children}</span>;}
 export function PaymentBadge({value}:{value:Payment}){return <Badge tone={value==='Bezahlt'?'success':value==='Unbezahlt'?'danger':'neutral'}>{value}</Badge>;}
-export function ServiceBadge({date,now}:{date:string|null;now:string}){return <Badge tone={!date?'neutral':date<now?'danger':date===now?'warning':'success'}>{!date?'Zu ergänzen':date<now?'Abgelaufen':date===now?'Läuft heute ab':'Aktiv'}</Badge>;}
+export function ServiceBadge({date,now}:{date:string|null;now:string}){return <Badge tone={!date?'neutral':date<now?'danger':date===now?'warning':'success'}>{!date?'Serviceende fehlt':date<now?'Abgelaufen':date===now?'Läuft heute ab':'Aktiv'}</Badge>;}
 export function Empty({title,text,action}:{title:string;text:string;action?:ReactNode}){return <div className="empty"><div className="empty-icon"><Users size={27}/></div><h3>{title}</h3><p>{text}</p>{action}</div>;}
 export function Field({label,children,hint,wide=false}:{label:string;children:ReactNode;hint?:string;wide?:boolean}){return <label className={'field '+(wide?'wide':'')}><span>{label}</span>{children}{hint&&<small>{hint}</small>}</label>;}
 export function Modal({title,subtitle,children,onClose,wide=false}:{title:string;subtitle?:string;children:ReactNode;onClose:()=>void;wide?:boolean}){

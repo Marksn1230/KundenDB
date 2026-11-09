@@ -667,6 +667,20 @@
           },
           "requires_mac_approval": {
             "type": "boolean"
+          },
+          "previous_name": {
+            "type": "string"
+          },
+          "requires_name_approval": {
+            "type": "boolean"
+          },
+          "end_change": {
+            "type": "string",
+            "enum": [
+              "initial",
+              "update"
+            ],
+            "description": "initial: Serviceende erstmals setzen; update: vorhandenes Ende ändern."
           }
         },
         "required": [
@@ -768,7 +782,7 @@
           },
           "mapping": {
             "type": "object",
-            "description": "Dateispalte → Zielfeld. name, mac_address und service_end sind immer erforderlich. Die Vorlage verwendet Name, MAC-Adresse, Serviceende.",
+            "description": "Dateispalte → Zielfeld. name und mac_address sind erforderlich; service_end ist optional. Fehlendes/leeres Datum erhält vorhandene Enddaten.",
             "additionalProperties": {
               "type": "string",
               "enum": [
@@ -815,7 +829,7 @@
               "existing_only"
             ],
             "default": "all",
-            "description": "existing_only aktualisiert ausschließlich vorhandene Konten anhand des Benutzernamens. Keine Neuanlagen; Kennungswechsel brauchen approve_mac pro Zeile."
+            "description": "all: Name und Kennung gemeinsam; existing_only: vorhandene Konten auch über eindeutigen Einzelfeldtreffer prüfen. Datum, Name und MAC sind unabhängig freigebbar. Keine Neuanlagen in existing_only."
           }
         },
         "required": [
@@ -1336,6 +1350,57 @@
           "status",
           "filename",
           "expires_at"
+        ],
+        "additionalProperties": false
+      },
+      "DuePage": {
+        "type": "object",
+        "properties": {
+          "as_of": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "through": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "group": {
+            "type": "string",
+            "enum": [
+              "expired",
+              "upcoming"
+            ]
+          },
+          "total": {
+            "type": "integer"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "per_page": {
+            "type": "integer"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Customer"
+            }
+          }
+        },
+        "required": [
+          "as_of",
+          "through",
+          "group",
+          "total",
+          "page",
+          "per_page",
+          "data"
         ],
         "additionalProperties": false
       }
@@ -3913,12 +3978,20 @@
                         },
                         "approve_mac": {
                           "const": true,
-                          "description": "Nur explizit für diese Zeile bestätigen. Bei abweichender Kennung im Aktualisierungsmodus zwingend."
+                          "description": "Nur die vorgeschlagene MAC-/Kennungsänderung freigeben. Ohne Zustimmung bleibt die gespeicherte Kennung erhalten."
+                        },
+                        "approve_name": {
+                          "const": true,
+                          "description": "Nur die vorgeschlagene Namensänderung freigeben. Ohne Zustimmung bleibt der gespeicherte Name erhalten."
+                        },
+                        "approve_end": {
+                          "type": "boolean",
+                          "default": true,
+                          "description": "Gültiges, tatsächlich geändertes Enddatum übernehmen. false erlaubt eine reine Namens-/Kennungsfreigabe. Fehlende oder leere Importdaten löschen kein Datum."
                         }
                       },
                       "required": [
-                        "index",
-                        "payment"
+                        "index"
                       ],
                       "additionalProperties": false
                     }
@@ -6398,6 +6471,177 @@
             }
           }
         }
+      }
+    },
+    "/customers/due": {
+      "get": {
+        "summary": "Aktuelle Services: alle abgelaufenen oder heute bis einschließlich 15 Kalendertage, Europe/Vienna",
+        "description": "Administrator oder Mitarbeiter. Mitarbeiter dürfen keine Konten löschen.",
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "oidc": [
+              "openid"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Erfolgreich",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DuePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validierungsfehler",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Anmeldung erforderlich oder Token widerrufen",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Berechtigung, MFA oder CSRF fehlt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Versionskonflikt: neu laden / Vorschau aktualisieren",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Datei oder Anfrage zu groß",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Inhaltstyp nicht unterstützt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate Limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Interner Fehler",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Integrationsfehler",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Konfiguration fehlt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "group",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "expired",
+                "upcoming"
+              ]
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10
+            }
+          }
+        ]
       }
     }
   }

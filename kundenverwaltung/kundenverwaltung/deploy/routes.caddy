@@ -1,0 +1,11 @@
+encode zstd gzip
+@privateIdentity path /auth/admin* /auth/realms/master*
+respond @privateIdentity 404
+handle /auth/* {
+ reverse_proxy keycloak:8080
+}
+handle {
+ reverse_proxy web:3000
+}
+header X-Content-Type-Options "nosniff"
+header Referrer-Policy "same-origin"

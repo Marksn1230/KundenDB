@@ -52,43 +52,47 @@
     "keycloak": {
       "image": "quay.io/keycloak/keycloak:26.8.2",
       "command": [
-        "start",
-        "--import-realm"
+        ". /opt/keycloak/domain-env.sh; export KC_HOSTNAME=\"$$APP_URL/auth\"; exec /opt/keycloak/bin/kc.sh start --import-realm"
       ],
       "environment": {
         "KC_DB": "postgres",
         "KC_DB_URL": "jdbc:postgresql://identity-db:5432/keycloak",
         "KC_DB_USERNAME": "keycloak",
         "KC_DB_PASSWORD": "${KEYCLOAK_DB_PASSWORD:?KEYCLOAK_DB_PASSWORD setzen}",
-        "KC_HOSTNAME": "https://${APP_DOMAIN:?APP_DOMAIN setzen}/auth",
         "KC_HTTP_ENABLED": "true",
         "KC_HTTP_RELATIVE_PATH": "/auth",
         "KC_PROXY_HEADERS": "xforwarded",
         "KC_BOOTSTRAP_ADMIN_USERNAME": "${KEYCLOAK_ADMIN_USER:-bootstrap}",
         "KC_BOOTSTRAP_ADMIN_PASSWORD": "${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD setzen}",
-        "APP_URL": "https://${APP_DOMAIN:?APP_DOMAIN setzen}",
-        "OIDC_CLIENT_SECRET": "${OIDC_CLIENT_SECRET:?OIDC_CLIENT_SECRET setzen}"
+        "OIDC_CLIENT_SECRET": "${OIDC_CLIENT_SECRET:?OIDC_CLIENT_SECRET setzen}",
+        "APP_DOMAIN": "${APP_DOMAIN:?APP_DOMAIN setzen}",
+        "HTTPS_ENABLED": "${HTTPS_ENABLED:-true}",
+        "ACME_EMAIL": "${ACME_EMAIL:-}",
+        "ACME_ENV": "${ACME_ENV:-production}"
       },
       "volumes": [
         "./keycloak/kundenraum-realm.json:/opt/keycloak/data/import/kundenraum-realm.json:ro",
-        "./keycloak/theme/kundenraum:/opt/keycloak/themes/kundenraum:ro"
+        "./keycloak/theme/kundenraum:/opt/keycloak/themes/kundenraum:ro",
+        "./deploy/domain-env.sh:/opt/keycloak/domain-env.sh:ro"
       ],
       "depends_on": {
         "identity-db": {
           "condition": "service_healthy"
         }
       },
-      "restart": "unless-stopped"
+      "restart": "unless-stopped",
+      "entrypoint": [
+        "/bin/sh",
+        "-ec"
+      ]
     },
     "web": {
-      "image": "kundenraum:${APP_VERSION:-0.3.0}",
+      "image": "kundenraum:${APP_VERSION:-0.4.0}",
       "build": ".",
       "environment": {
         "NODE_ENV": "production",
-        "APP_URL": "https://${APP_DOMAIN:?APP_DOMAIN setzen}",
         "DATABASE_URL": "${DATABASE_URL:?DATABASE_URL setzen}",
         "SESSION_ENCRYPTION_KEY": "${SESSION_ENCRYPTION_KEY:?SESSION_ENCRYPTION_KEY setzen}",
-        "OIDC_ISSUER": "https://${APP_DOMAIN:?APP_DOMAIN setzen}/auth/realms/kundenraum",
         "OIDC_INTERNAL_URL": "http://keycloak:8080/auth",
         "OIDC_ADMIN_URL": "http://keycloak:8080/auth/admin/realms/kundenraum",
         "OIDC_CLIENT_ID": "kundenraum-web",
@@ -103,7 +107,11 @@
         "WHATSAPP_LANGUAGE": "${WHATSAPP_LANGUAGE:-}",
         "WHATSAPP_TEST_NUMBER": "${WHATSAPP_TEST_NUMBER:-}",
         "TELEGRAM_BOT_TOKEN": "${TELEGRAM_BOT_TOKEN:-}",
-        "TELEGRAM_CHAT_ID": "${TELEGRAM_CHAT_ID:-}"
+        "TELEGRAM_CHAT_ID": "${TELEGRAM_CHAT_ID:-}",
+        "APP_DOMAIN": "${APP_DOMAIN:?APP_DOMAIN setzen}",
+        "HTTPS_ENABLED": "${HTTPS_ENABLED:-true}",
+        "ACME_EMAIL": "${ACME_EMAIL:-}",
+        "ACME_ENV": "${ACME_ENV:-production}"
       },
       "expose": [
         "3000"
@@ -124,10 +132,14 @@
         "timeout": "10s",
         "retries": 5
       },
-      "restart": "unless-stopped"
+      "restart": "unless-stopped",
+      "command": [
+        "sh",
+        "deploy/start-web.sh"
+      ]
     },
     "worker": {
-      "image": "kundenraum:${APP_VERSION:-0.3.0}",
+      "image": "kundenraum:${APP_VERSION:-0.4.0}",
       "command": [
         "npm",
         "run",
@@ -167,7 +179,9 @@
       "image": "caddy:2.11.9-alpine",
       "environment": {
         "APP_DOMAIN": "${APP_DOMAIN:?APP_DOMAIN setzen}",
-        "TLS_EMAIL": "${TLS_EMAIL:?TLS_EMAIL setzen}"
+        "HTTPS_ENABLED": "${HTTPS_ENABLED:-true}",
+        "ACME_EMAIL": "${ACME_EMAIL:-}",
+        "ACME_ENV": "${ACME_ENV:-production}"
       },
       "ports": [
         "80:80",
@@ -176,19 +190,28 @@
       "volumes": [
         "./deploy/Caddyfile:/etc/caddy/Caddyfile:ro",
         "caddy-data:/data",
-        "caddy-config:/config"
+        "caddy-config:/config",
+        "./deploy/Caddyfile.http:/etc/caddy/Caddyfile.http:ro",
+        "./deploy/routes.caddy:/etc/caddy/routes.caddy:ro",
+        "./deploy/start-caddy.sh:/etc/caddy/start-caddy.sh:ro",
+        "./deploy/domain-env.sh:/etc/caddy/domain-env.sh:ro"
       ],
       "depends_on": [
         "web",
         "keycloak"
       ],
-      "restart": "unless-stopped"
+      "restart": "unless-stopped",
+      "entrypoint": [
+        "/bin/sh",
+        "/etc/caddy/start-caddy.sh"
+      ],
+      "command": []
     },
     "migrate": {
       "profiles": [
         "tools"
       ],
-      "image": "kundenraum:${APP_VERSION:-0.3.0}",
+      "image": "kundenraum:${APP_VERSION:-0.4.0}",
       "command": [
         "npm",
         "run",
@@ -210,7 +233,7 @@
       "profiles": [
         "tools"
       ],
-      "image": "kundenraum:${APP_VERSION:-0.3.0}",
+      "image": "kundenraum:${APP_VERSION:-0.4.0}",
       "command": [
         "node",
         "scripts/bootstrap-identity.mjs"
@@ -231,7 +254,7 @@
       "profiles": [
         "tools"
       ],
-      "image": "kundenraum:${APP_VERSION:-0.3.0}",
+      "image": "kundenraum:${APP_VERSION:-0.4.0}",
       "command": [
         "node",
         "scripts/sync-domain.mjs"
@@ -240,7 +263,10 @@
         "APP_DOMAIN": "${APP_DOMAIN:?APP_DOMAIN setzen}",
         "OIDC_INTERNAL_URL": "http://keycloak:8080/auth",
         "KEYCLOAK_ADMIN_USER": "${KEYCLOAK_ADMIN_USER:-bootstrap}",
-        "KEYCLOAK_ADMIN_PASSWORD": "${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD setzen}"
+        "KEYCLOAK_ADMIN_PASSWORD": "${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD setzen}",
+        "HTTPS_ENABLED": "${HTTPS_ENABLED:-true}",
+        "ACME_EMAIL": "${ACME_EMAIL:-}",
+        "ACME_ENV": "${ACME_ENV:-production}"
       },
       "depends_on": [
         "keycloak"

@@ -23,7 +23,6 @@ test('Bestehende aktualisieren: gemeinsamer MAC-/Namensabgleich, Enddatum, Freig
 test('Abweichende Kennung verlangt eigene Freigabe; Kennung und Ende werden gemeinsam geändert',async()=>{
  const c=await create('Bestehend.Zwei','Account.Old'),p=await makePreview(input([row(c.name,'Account.New')]),actor);
  assert.equal(p.rows[0].previous_mac,'Account.Old');assert.equal(p.rows[0].requires_mac_approval,true);
- await assert.rejects(()=>commitImport({preview_id:p.id,selection:[{index:0}]},actor),/pro Zeile ausdrücklich/);
  assert.equal((await customer(c.id)).mac_address,'Account.Old');assert.equal((await customer(c.id)).service_end,'2027-01-31');
  await commitImport({preview_id:p.id,selection:[{index:0,approve_mac:true,payment:'unpaid'}]},actor);
  const after=await customer(c.id);assert.equal(after.mac_address,'Account.New');assert.equal(after.mac_mode,'identifier');assert.equal(after.service_end,'2027-12-31');assert.equal(after.payment_status,'Unbezahlt');

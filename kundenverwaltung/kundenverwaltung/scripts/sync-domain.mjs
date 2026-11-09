@@ -1,7 +1,6 @@
 import {setTimeout as delay} from 'node:timers/promises';
-const domain=process.env.APP_DOMAIN;
-if(!domain||!/^([a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/.test(domain))throw new Error('APP_DOMAIN muss ein DNS-Hostname ohne Schema, Port oder Pfad sein.');
-const app='https://'+domain,root=(process.env.OIDC_INTERNAL_URL||'http://keycloak:8080/auth').replace(/\/$/,'');
+import {domainSettings} from './domain-config.mjs';
+const settings=domainSettings(process.env),app=settings.origin,root=(process.env.OIDC_INTERNAL_URL||'http://keycloak:8080/auth').replace(/\/$/,'');
 const username=process.env.KEYCLOAK_ADMIN_USER,password=process.env.KEYCLOAK_ADMIN_PASSWORD;
 if(!username||!password)throw new Error('Gültigen IdP-Wartungszugang in KEYCLOAK_ADMIN_USER/PASSWORD setzen.');
 let ready=false;for(let n=0;n<120;n++){try{if((await fetch(root+'/realms/kundenraum/.well-known/openid-configuration',{signal:AbortSignal.timeout(2000)})).ok){ready=true;break;}}catch{}await delay(1000);}if(!ready)throw new Error('Keycloak ist nicht bereit. Containerlogs prüfen.');
@@ -14,6 +13,6 @@ if(clients.length!==1)throw new Error('Web-Login-Client nicht eindeutig gefunden
 const client=await(await admin('/clients/'+clients[0].id)).json();
 await admin('/clients/'+client.id,'PUT',{...client,rootUrl:app,baseUrl:app,redirectUris:[app+'/api/auth/callback'],webOrigins:[app],attributes:{...client.attributes,'post.logout.redirect.uris':app+'/*'}});
 const realm=await(await admin('')).json();
-await admin('','PUT',{attributes:{...realm.attributes,frontendUrl:app+'/auth'}});
+await admin('','PUT',{attributes:{...realm.attributes,frontendUrl:app+'/auth'},sslRequired:settings.https?'external':'none'});
 await admin('/logout-all','POST');
 console.log('Web-Callback, erlaubte Origin und IdP-Frontend auf '+app+' aktualisiert; bestehende IdP-Sitzungen beendet. iOS-/Fremdclients separat prüfen.');

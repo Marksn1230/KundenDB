@@ -5,6 +5,8 @@ const rows=[
  ['demo.alpen','02:00:00:AA:00:01','28.02.2027','0676 1234567','Fiktive Adresse','00123','Art','1','Marko','1,5','31.01.2027','31.01.2027','Unbezahlt','Fiktives Beispiel ohne Versandeinwilligung','MAC'],
  ['demo.konto','Service.Alpha','31.12.2027','','','01234','2GO','12','Mirko','12','31.12.2026','31.12.2026','Unbekannt','Freie Kennung bleibt unverändert','Kennung']
 ];
+const noEnd=Array(15).fill('');Object.assign(noEnd,{0:'demo.ohneDatum',1:'Service.OhneDatum',12:'Unbekannt',13:'Serviceende fehlt – später ergänzen',14:'Kennung'});rows.push(noEnd);
+fs.writeFileSync('public/examples/import-ohne-serviceende.csv','\uFEFFName;MAC-Adresse\r\ndemo.ohneDatum;Service.OhneDatum\r\n');
 fs.mkdirSync('public/examples',{recursive:true});fs.writeFileSync('public/examples/import-vorlage.csv','\uFEFF'+[columns,...rows].map(row=>row.join(';')).join('\r\n')+'\r\n');
 const workbook=new ExcelJS.Workbook(),sheet=workbook.addWorksheet('Kunden');
 sheet.addRow(columns);for(const row of rows)sheet.addRow(row);

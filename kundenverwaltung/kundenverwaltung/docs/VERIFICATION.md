@@ -9,7 +9,7 @@ Stand: **09.11.2026**, Windows/PowerShell, Node.js **26.13.0**, Next.js **16.4.5
 | npm run check | TypeScript ohne Fehler |
 | NEXT_DIST_DIR=.next-verify npm run build | Produktionsbuild erfolgreich; separat vom laufenden Devserver |
 | npm run api:export + Swagger Parser im HTTP-Test | OpenAPI 3.1 strukturell gültig, neue Modelle exportiert |
-| NEXT_DIST_DIR=.next-verify npm test | **41 Tests bestanden**, 0 Fehler, 0 übersprungen (inklusive Untertests) |
+| NEXT_DIST_DIR=.next-verify npm test | **59 Tests bestanden**, 0 Fehler, 0 übersprungen (inklusive Untertests) |
 | npm audit --audit-level=low | **0 bekannte Schwachstellen** im dokumentierten Lauf |
 | docker compose --env-file deploy/.env.example -f compose.server.yml config --quiet | Serverkonfiguration ohne Fehler aufgelöst; Geheimnisse nicht ausgegeben |
 | Frische PostgreSQL-Engine mit PGlite | Schema, SQL-Adapter, Kalenderdaten, freie Kennung, Importfreigabe, Zahlung und Rollback erfolgreich |
@@ -77,3 +77,19 @@ Realer Docker-Startversuch: docker compose --env-file .runtime/compose-test.env 
 Neue Bildschirmnachweise: test-results/import-existing-desktop.png, test-results/backup-admin-https.png (ausschließlich fiktive Testdaten). Reproduzierbarer nativer Test: TEST_PG_BIN auf PostgreSQL-bin und TEST_CADDY_BINARY auf die Caddy-Datei setzen, anschließend NEXT_DIST_DIR=.next-verify npm test. Ohne Binaries wird der optionale Prozessintegrationstest ausdrücklich als übersprungen ausgegeben.
 
 Abschließender lokaler Dienstcheck: Web-Health 200, anonyme Kunden-API 401, echtes Keycloak-Loginformular unter http://localhost:3000/auth erreichbar. Der lokale Starter prüft jetzt zusätzlich den absoluten Worker-Skriptpfad statt nur einer möglicherweise wiederverwendeten Windows-Prozess-ID. Worker neu gestartet, aktueller Heartbeat und erneuter Starteraufruf ohne Doppelstart geprüft.
+
+## Abnahme: Domain-Assistent, 15-Tage-Fälligkeit und optionales Enddatum – 09.11.2026
+
+Ausgangsbranch master, Ausgangscommit 2f9303c, Remote orgin/master. Produktionsbuild .next-verify und TypeScript erfolgreich. Vollständige Suite **59 Tests bestanden**, 0 Fehler, 0 übersprungen; npm audit meldet 0 bekannte Schwachstellen.
+
+Neue Nachweise: Heute in Europe/Vienna einschließlich UTC-/Kalendertagswechsel, Grenze Tag 15 inklusive/Tag 16 ausgeschlossen, alle Abgelaufenen, Pagination/Gesamtzahlen, ausschließlich aktueller Zeitraum und Entfernen nach Verlängerung außerhalb des Fensters. Geschützte Fälligkeits-API, fehlendes Enddatum, Datum erstmals setzen ohne zusätzliche Historie, leere/fehlende Importspalte, ungültige Datumseingabe, eindeutiger Name-only-/MAC-only-Treffer, unabhängige Datum-/Namens-/MAC-Freigabe, Konflikt zwischen Konten, erneute Versionsprüfung und Import-Replay geprüft. Die Browserprüfung prüft die direkte Verlängerung aus der Übersicht, den Löschdialog mit Name/Nummer, Datum ohne Namensübernahme sowie die Neuanlage aus einer Zweispalten-CSV.
+
+Domain-Assistent: Eingabevalidierung, Bestätigung/Abbruch, vollständige geschützte .env-Sicherung und Rückkehr unter Erhalt anderer Geheimnisse. Fehlende/falsche A-/AAAA-Einträge und Resolverfehler mit isolierten Resolver-Fixtures geprüft; es wurden keine öffentlichen DNS-Einträge geändert. Shell-Orchestrierung mit Test-Docker-Kommandos prüft Abbruch vor Neustarts und ausschließlich keycloak/identity-config/web/caddy im Erfolgsfall, ohne Build/Migration/Datenbank-/Worker-Neustart. Gemeinsames Shell-Environment für HTTP/HTTPS und Production/Staging tatsächlich unter Bash ausgeführt. Caddy 2.11.9 adaptiert die echten Caddyfiles: genau ein ACME-Issuer mit ausdrücklich gewähltem Let’s-Encrypt-Verzeichnis, Staging-URL und reiner HTTP-Modus. Keycloak-Callback/Origin/Frontend und SSL-Vorgabe für zwei HTTPS-Domains und eine HTTP-Domain gegen Verwaltungsfixture geprüft.
+
+Weiterhin erfolgreich: echter nativer PostgreSQL-17.11-Dump und Restore in zweite Datenbank, Admin-Backupdownload, echter Caddy-HTTPS-Proxy mit isolierter interner CA, geschütztes Login mit signiertem Testprovider und Secure-Cookie. Diese lokale CA ist **kein Let’s-Encrypt-Ausstellungstest**.
+
+**Öffentliche Let’s-Encrypt-Ausstellung und tatsächliche Erneuerung nicht getestet.** Es fehlt eine bereitgestellte öffentlich erreichbare Testdomain mit A/AAAA auf diesen Server und erreichbaren Ports 80/443; Docker ist weiterhin wegen fehlender DockerDesktopLinuxEngine-Pipe nicht verfügbar. Wiederholte Ausstellungstests sind ausdrücklich über --acme-env staging vorbereitet. Automatische Erneuerung und Verwendung erneuerter Zertifikate sind durch Caddy konfiguriert; das wurde nicht als tatsächlich beobachtete Erneuerung ausgegeben. Für eine spätere Abnahme Domain und Firewall/Docker bereitstellen, Staging ausstellen lassen, Status/Ablauf prüfen und anschließend gezielt auf Production umstellen.
+
+Anleitungen: docs/DOMAIN.md (Ersteinrichtung, Aktivierung, Wechsel, Status, Staging und Rückkehr), docs/SERVER.md (Installation/Import), docs/API.md und docs/openapi.json. Vorlagen import-vorlage.csv/.xlsx und import-ohne-serviceende.csv sind aktualisiert und enthalten ausschließlich fiktive Daten. Keine Schema-Migration ist für diese Änderungen erforderlich; Bestandsdaten und persönliche Logins werden beibehalten.
+
+Abschließender Dienstcheck dieses Stands: http://localhost:3000/api/v1/health → 200, neue Fälligkeits-API anonym → 401, echtes Keycloak-Loginformular unter http://localhost:3000/auth erreichbar, Worker-Heartbeat aktuell. Vorhandenes Konto maki wurde beibehalten.

@@ -76,7 +76,7 @@ Jede echte Zahlungsänderung erhöht die Kundenversion und wird protokolliert.
 }
 ```
 
-Kategorien `existing`, `changed`, `new`, `review`. Name und MAC/Kennung dienen gemeinsam dem Abgleich. Freie Kennungen werden außen getrimmt und unter Beachtung der Groß-/Kleinschreibung verglichen. Die Moduserkennung kann mit modes: { "0": "identifier" } pro Zeile korrigiert werden. Alle drei Pflichtfelder gelten für jede Datei; leere optionale Werte überschreiben nichts. Bei Bedarf erzeugt `resolutions: { "0": 42 }` eine **neue** Vorschau mit expliziter manueller Zuordnung der ersten Zeile zur internen Kunden-ID 42. Doppelte Zeilen und nicht eindeutige Identitäten bleiben gesperrt.
+Kategorien `existing`, `changed`, `new`, `review`. Name und MAC/Kennung dienen gemeinsam dem Abgleich. Freie Kennungen werden außen getrimmt und unter Beachtung der Groß-/Kleinschreibung verglichen. Die Moduserkennung kann mit modes: { "0": "identifier" } pro Zeile korrigiert werden. Nur Name und MAC-Adresse sind Pflicht; Serviceende darf fehlen oder leer sein; leere optionale Werte überschreiben nichts. Bei Bedarf erzeugt `resolutions: { "0": 42 }` eine **neue** Vorschau mit expliziter manueller Zuordnung der ersten Zeile zur internen Kunden-ID 42. Doppelte Zeilen und nicht eindeutige Identitäten bleiben gesperrt.
 
 3. `POST /imports/commit`:
 
@@ -120,6 +120,14 @@ POST /users mit {"action":"create","username":"demo.user","role":"employee","pas
 
 ## Aktualisierungsimport und Datenbank-Backups
 
-POST /imports/preview akzeptiert mode: existing_only (Standard all). In diesem Modus zählen nur name, mac_address, mac_mode und service_end; andere Stammdaten werden nicht überschrieben. Ergebnis unmatched bedeutet Kein Treffer, existing Unverändert. changed liefert previous_mac, previous_mac_mode, previous_end und requires_mac_approval. Bei requires_mac_approval muss die einzelne Auswahl in POST /imports/commit ausdrücklich approve_mac: true enthalten. Das erteilt keine Neuanlageberechtigung. Reiner Kennungswechsel erhält Zahlung; eine Enddatumsänderung nutzt weiterhin payment: keep | unpaid. Bei geänderter Trefferlage/Version 409, komplette Freigabe zurückgerollt.
+mode: existing_only prüft vorhandene Kunden über gemeinsamen oder eindeutigen einzelnen Name-/Kennungstreffer. Unterschiedliche Konten/Mehrdeutigkeit sind Konflikte. Name, MAC und Datum sind getrennt freigebbar; Details im folgenden Abschnitt. Andere Stammdaten werden in diesem Modus nicht überschrieben.
 
 Nur Admin-Websitzung (keine Bearer-Tokens): GET /backups liefert Verfügbarkeit; POST /backups mit {} und gültigem Origin/CSRF liefert 202 und BackupJob. GET /backups/{backup_id} liefert running, ready oder failed für den erstellenden Administrator. GET /backups/{backup_id}/download liefert einmalig application/octet-stream mit Content-Disposition und anschließend 404. Andere Administratoren erhalten 404, Mitarbeiter 403, anonyme Clients 401. Lebensdauer 15 Minuten; maximal drei Starts/15 Minuten und ein gleichzeitig laufender Dump. SQLite-Umgebung: Erstellung 503. Fehler zeigen keine DB-Zugangsdaten. OpenAPI enthält die Modelle und Grenzen.
+
+## Fälligkeiten und optionale Import-Enddaten
+
+GET /customers/due?group=expired|upcoming&page=1&per_page=10 liefert aktuelle Kunden mit total/page/per_page/as_of/through. expired umfasst Serviceende vor heute; upcoming heute bis einschließlich 15 Kalendertage in Europe/Vienna. Datumslos und historische Zeiträume sind ausgeschlossen. Beide Rollen dürfen lesen; Löschen bleibt adminpflichtig und verlangt die bestehende Bestätigung.
+
+Import benötigt nur name und mac_address. service_end darf ohne Zuordnung fehlen oder eine leere Zelle sein. Neue Konten erhalten dann null, bestehende behalten ihr Datum. Ein ausgefüllter ungültiger Wert bleibt review. Im Modus existing_only werden auch Name-only-/MAC-only-Treffer vorgeschlagen; unterschiedliche Konten/Mehrdeutigkeit sind review/Konflikt. Neu: previous_name, requires_name_approval, end_change initial|update. approve_name:true und approve_mac:true geben nur diese Identitätsänderung frei. Ohne sie bleibt das jeweilige Feld erhalten. approve_end (Standard true für bestehende API-Clients) steuert die Datumskorrektur unabhängig; die Weboberfläche sendet ihre einzelne Datumsfreigabe explizit. Ein reiner Identitätswechsel ohne Enddatumsfreigabe erhält Zahlungsstatus und Zeitraum. Serviceende erstmals setzen korrigiert den aktuellen Zeitraum und erzeugt keine zweite Historienzeile.
+
+Vollständige Modelle siehe OpenAPI.

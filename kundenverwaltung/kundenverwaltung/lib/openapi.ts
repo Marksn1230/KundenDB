@@ -100,3 +100,14 @@ spec.paths['/backups']={
 };
 spec.paths['/backups/{backup_id}']={parameters:[{name:'backup_id',in:'path',required:true,schema:{type:'string',format:'uuid'}}],get:{...op('Status ausschließlich für erstellenden Administrator',ref('BackupJob'),undefined,true),security:[{sessionCookie:[]}]}};
 spec.paths['/backups/{backup_id}/download']={parameters:[{name:'backup_id',in:'path',required:true,schema:{type:'string',format:'uuid'}}],get:{summary:'Einmaliger geschützter PostgreSQL-Custom-Dump-Download; Datei anschließend entfernen',security:[{sessionCookie:[]}],responses:{200:{description:'Dump für pg_restore; Dateiname über Content-Disposition',content:{'application/octet-stream':{schema:{type:'string',format:'binary'}}}},...errors}}};
+
+spec.components.schemas.ImportRequest.properties.mapping.description='Dateispalte → Zielfeld. name und mac_address sind erforderlich; service_end ist optional. Fehlendes/leeres Datum erhält vorhandene Enddaten.';
+spec.components.schemas.ImportRequest.properties.mode.description='all: Name und Kennung gemeinsam; existing_only: vorhandene Konten auch über eindeutigen Einzelfeldtreffer prüfen. Datum, Name und MAC sind unabhängig freigebbar. Keine Neuanlagen in existing_only.';
+Object.assign(spec.components.schemas.ImportRow.properties,{previous_name:str,requires_name_approval:{type:'boolean'},end_change:{type:'string',enum:['initial','update'],description:'initial: Serviceende erstmals setzen; update: vorhandenes Ende ändern.'}});
+const importSelection=spec.paths['/imports/commit'].post.requestBody.content['application/json'].schema.properties.selection.items;
+importSelection.required=['index'];
+importSelection.properties.approve_mac={const:true,description:'Nur die vorgeschlagene MAC-/Kennungsänderung freigeben. Ohne Zustimmung bleibt die gespeicherte Kennung erhalten.'};
+importSelection.properties.approve_name={const:true,description:'Nur die vorgeschlagene Namensänderung freigeben. Ohne Zustimmung bleibt der gespeicherte Name erhalten.'};
+importSelection.properties.approve_end={type:'boolean',default:true,description:'Gültiges, tatsächlich geändertes Enddatum übernehmen. false erlaubt eine reine Namens-/Kennungsfreigabe. Fehlende oder leere Importdaten löschen kein Datum.'};
+spec.components.schemas.DuePage=object({as_of:date,through:date,group:{type:'string',enum:['expired','upcoming']},total:integer,page:integer,per_page:integer,data:array(ref('Customer'))});
+spec.paths['/customers/due']={get:{...op('Aktuelle Services: alle abgelaufenen oder heute bis einschließlich 15 Kalendertage, Europe/Vienna',ref('DuePage')),parameters:[{name:'group',in:'query',required:true,schema:{type:'string',enum:['expired','upcoming']}},{name:'page',in:'query',schema:{type:'integer',minimum:1,default:1}},{name:'per_page',in:'query',schema:{type:'integer',minimum:1,maximum:100,default:10}}]}};

@@ -35,10 +35,10 @@ export function provider() {
     if (!configured())
         fail('Die Anmeldung ist noch nicht eingerichtet. Bitte README beachten.', 503);
     const localHttp = process.env.ALLOW_LOCAL_HTTP === 'true' && ['localhost', '127.0.0.1', '[::1]'].includes(new URL(appUrl()).hostname);
-    if (process.env.NODE_ENV === 'production' && !secure() && !localHttp)
+    if (process.env.NODE_ENV === 'production' && !secure() && !localHttp && process.env.HTTPS_ENABLED !== 'false')
         fail('Produktivbetrieb benötigt HTTPS.', 503);
     return configuration ??= oidc.discovery(new URL(process.env.OIDC_ISSUER!), process.env.OIDC_CLIENT_ID!, process.env.OIDC_CLIENT_SECRET!, undefined, {
-        ...(process.env.ALLOW_LOCAL_HTTP === 'true' ? { execute: [oidc.allowInsecureRequests] } : {}),
+        ...((process.env.ALLOW_LOCAL_HTTP === 'true'||process.env.HTTPS_ENABLED==='false') ? { execute: [oidc.allowInsecureRequests] } : {}),
         [oidc.customFetch]: async (input, init) => {
             const url = new URL(input);
             if (process.env.OIDC_INTERNAL_URL && url.origin === new URL(process.env.OIDC_ISSUER!).origin) {

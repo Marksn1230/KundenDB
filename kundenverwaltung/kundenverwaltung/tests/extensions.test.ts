@@ -33,7 +33,7 @@ test('Gemeinsamer Drei-Spalten-Import erkennt Modus und schreibt erst nach Freig
  const c=(await all<any>('SELECT * FROM customers'))[0];assert.equal(c.mac_address,'Case.User');assert.equal(c.mac_mode,'identifier');assert.match(c.customer_number,/^[A-Z0-9]{6}$/);
  const repeated=await makePreview(input,actor);assert.equal(repeated.counts.existing,1);await commitImport({preview_id:repeated.id,selection:[{index:0,payment:'unpaid'}]},actor);assert.equal((await all('SELECT * FROM periods WHERE customer_id=?',c.id)).length,1);
  const conflict=await makePreview({...input,rows:[{Name:'Fiktiv.A',Kennung:'case.user',Ende:'28.02.2027'}]},actor);assert.equal(conflict.counts.review,1);
- await assert.rejects(()=>makePreview({...input,mapping:{Name:'name',Kennung:'mac_address'}},actor),/Pflichtspalten/);
+ await assert.rejects(()=>makePreview({...input,mapping:{Name:'name',Ende:'service_end'}},actor),/Pflichtspalten/);
 });
 test('Einheitlicher Import überschreibt leere optionale Felder nicht und bewahrt Zahlungswahl',async()=>{
  const c=await transaction(()=>createCustomer({name:'Liste.B',mac_address:'02:AA:00:00:00:02',phone:'0676 1234567',postal_code:'00123',service_end:'2027-02-28',payment_status:'Bezahlt'},actor,true));

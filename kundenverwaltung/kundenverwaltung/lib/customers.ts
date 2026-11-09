@@ -13,7 +13,7 @@ async function identity(data:CustomerInput,except?:number){const matches=await a
 async function period(id:number,data:CustomerInput,end:string|null,due:string|null,source:string){return Number((await run('INSERT INTO periods(customer_id,service_start,service_end,package_months,payment_status,due_date,end_source) VALUES(?,?,?,?,?,?,?)',id,data.service_start,end,data.package_months,data.payment_status,due,source)).lastInsertRowid);}
 export async function createCustomer(raw:unknown,actor:string,incomplete=false){
  const data=await input(raw);if(!incomplete&&(!data.service_start||!data.package_months||!data.provider||!data.assignee))fail('Servicebeginn, Paket, Anbieter und Benutzerzuordnung sind erforderlich.');
- await identity(data);const end=data.service_end??(data.service_start&&data.package_months?addMonths(data.service_start,data.package_months):null);
+ await identity(data);const end=incomplete&&Object.hasOwn(data,'service_end')?data.service_end??null:data.service_end??(data.service_start&&data.package_months?addMonths(data.service_start,data.package_months):null);
  if(end&&data.service_start&&end<=data.service_start)fail('Serviceende muss nach dem Servicebeginn liegen.');
  let id=0;for(let i=0;i<100;i++){const inserted=await run('INSERT INTO customers(customer_number,name,name_key,mac_address,mac_mode,phone,postal_code,address,provider,assignee,points,comment,consent,consent_note,consent_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(customer_number) DO NOTHING',await customerNumber(),data.name,normalizeName(data.name),data.mac_address,data.mac_mode,data.phone,data.postal_code,data.address,data.provider,data.assignee,data.points,data.comment,data.consent?1:0,data.consent_note,data.consent?new Date().toISOString():null);if(inserted.changes){id=Number(inserted.lastInsertRowid);break;}}
  if(!id)fail('Kundennummer konnte nicht erzeugt werden.',503);
@@ -24,8 +24,9 @@ export async function updateCustomer(id:number,patch:Record<string,unknown>,vers
  const old=await customer(id);checkVersion(old,version);
  const base=Object.fromEntries(Object.keys(customerSchema.shape).map(k=>[k,old[k as keyof Customer]]));const data=await input({...base,...patch});if(imported)data.payment_status=paymentChoice==='unpaid'?'Unbezahlt':old.payment_status;await identity(data,id);
  let end=data.service_end??null,source=old.end_source;
- if(Object.hasOwn(patch,'service_end')&&data.service_end!==old.service_end)source='imported';
- else if((source==='calculated'||!old.service_end)&&(data.service_start!==old.service_start||data.package_months!==old.package_months||!old.service_end)){end=data.service_start&&data.package_months?addMonths(data.service_start,data.package_months):null;source='calculated';}
+ if(imported&&!Object.hasOwn(patch,'service_end')){end=old.service_end;source=old.end_source;}
+ else if(Object.hasOwn(patch,'service_end')&&data.service_end!==old.service_end)source='imported';
+ else if((source==='calculated'||!old.service_end)&&(data.service_start!==old.service_start||data.package_months!==old.package_months)){end=data.service_start&&data.package_months?addMonths(data.service_start,data.package_months):null;source='calculated';}
  if(end&&data.service_start&&end<=data.service_start)fail('Serviceende muss nach dem Servicebeginn liegen.');
  if(imported&&end&&old.service_end&&end>old.service_end){
    await run('UPDATE periods SET is_current=0 WHERE id=?',old.period_id);
@@ -62,6 +63,6 @@ export async function reports(params:URLSearchParams,now=today()){
  const bucket=(month:string)=>{if(!months.has(month))months.set(month,{month,paid:0,unpaid:0,unknown:0,expiries:0,customer_ids:[]});return months.get(month)!;};
  for(const p of periods){if(p.due_date){const b=bucket(p.due_date.slice(0,7));b[p.payment_status==='Bezahlt'?'paid':p.payment_status==='Unbezahlt'?'unpaid':'unknown']++;b.customer_ids.push(p.customer_id);}if(p.service_end)bucket(p.service_end.slice(0,7)).expiries++;}
  const unpaid=periods.filter(p=>p.payment_status==='Unbezahlt').map(p=>({...p,customer:customers.find(c=>c.id===p.customer_id)!,due_month:p.due_date?.slice(0,7)||null,full_months_overdue:p.due_date?fullMonths(p.due_date,now):null,overdue_label:!p.due_date?'Ohne Fälligkeitsdatum':p.due_date>now?'Noch nicht fällig':fullMonths(p.due_date,now)===0?'Unter einem Monat':fullMonths(p.due_date,now)+' volle Monate'}));
- return {as_of:now,customers:customers.length,active:customers.filter(c=>c.service_end&&c.service_end>=now).length,upcoming:customers.filter(c=>c.service_end&&c.service_end>=now&&c.service_end<=addDays(now,7)).length,unpaid,undated:unpaid.filter(p=>!p.due_date),periods:periods.map(p=>({...p,customer:customers.find(c=>c.id===p.customer_id)!})),months:[...months.values()].sort((a,b)=>a.month.localeCompare(b.month))};
+ return {as_of:now,customers:customers.length,active:customers.filter(c=>c.service_end&&c.service_end>=now).length,upcoming:customers.filter(c=>c.service_end&&c.service_end>=now&&c.service_end<=addDays(now,15)).length,unpaid,undated:unpaid.filter(p=>!p.due_date),periods:periods.map(p=>({...p,customer:customers.find(c=>c.id===p.customer_id)!})),months:[...months.values()].sort((a,b)=>a.month.localeCompare(b.month))};
 }
 export const atomic=transaction;

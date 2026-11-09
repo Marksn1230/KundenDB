@@ -12,7 +12,7 @@ export function calendarDate(value: string) {
   return !Number.isNaN(d.valueOf()) && d.toISOString().slice(0, 10) === value;
 }
 export const dateSchema = z.string().refine(calendarDate, 'Ungültiges Kalenderdatum (JJJJ-MM-TT).');
-export function today() { return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Vienna' }).format(new Date()); }
+export function today(reference=new Date()) { return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Vienna' }).format(reference); }
 export function addMonths(date: string, months: number) {
   if (!calendarDate(date) || !Number.isInteger(months)) fail('Ungültige Laufzeit.');
   const [year, month, day] = date.split('-').map(Number);

@@ -1,3 +1,4 @@
+import {dueCustomers} from '@/lib/due';
 import {backupAvailable,startBackup,backupStatus,downloadBackup} from '@/lib/backups';
 import {previewBulk,commitBulk} from '@/lib/bulk';
 import {countries} from '@/lib/phone';
@@ -76,6 +77,9 @@ async function dispatch(request: Request, context: Context) {
         if (endpoint === 'customers' && method === 'POST') {
             const body = customerSchema.parse(await input(request));
             return json(await transaction(async () => await createCustomer(body, actor.subject)), 201);
+        }
+        if(endpoint==='customers/due'&&method==='GET'){
+          const query=z.object({group:z.enum(['expired','upcoming']),page:z.coerce.number().int().min(1).max(100000).default(1),per_page:z.coerce.number().int().min(1).max(100).default(10)}).strict().parse(Object.fromEntries(url.searchParams));return json(await dueCustomers(query.group,query.page,query.per_page));
         }
         if (path[0] === 'customers' && path.length >= 2) {
             const id = z.coerce.number().int().positive().parse(path[1]);

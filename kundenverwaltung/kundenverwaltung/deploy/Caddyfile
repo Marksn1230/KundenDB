@@ -1,17 +1,13 @@
 {
- email {$TLS_EMAIL}
+ email {$ACME_EMAIL}
 }
 {$APP_DOMAIN} {
- encode zstd gzip
- @privateIdentity path /auth/admin* /auth/realms/master*
- respond @privateIdentity 404
- handle /auth/* {
-   reverse_proxy keycloak:8080
+ tls {
+  issuer acme {
+   dir {$ACME_DIRECTORY}
+   email {$ACME_EMAIL}
+  }
  }
- handle {
-   reverse_proxy web:3000
- }
+ import routes.caddy
  header Strict-Transport-Security "max-age=31536000; includeSubDomains"
- header X-Content-Type-Options "nosniff"
- header Referrer-Policy "same-origin"
 }

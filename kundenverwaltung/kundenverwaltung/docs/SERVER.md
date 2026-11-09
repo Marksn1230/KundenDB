@@ -1,3 +1,5 @@
+> Domain-/HTTPS-Einrichtung: [DOMAIN.md](DOMAIN.md). Standardmäßig HTTPS mit ausdrücklich gewähltem Let’s Encrypt; der Assistent bestätigt DNS und sichert die vorherige Konfiguration.
+
 # Serverinstallation mit Docker Compose
 
 Diese Anleitung gilt für einen frischen Ubuntu-24.04-LTS-Server (64 Bit), mit sudo-Rechten, mindestens 4 GB RAM, Domain mit A/AAAA-Eintrag auf den Server sowie erreichbaren TCP-Ports 80 und 443. SSH auf vertrauenswürdige Quellen beschränken. Die einzige veröffentlichte Anwendung ist Caddy auf 80/443; PostgreSQL, Keycloak, Web und Worker bleiben im Docker-Netz.
@@ -52,9 +54,9 @@ sudo docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" -w /work node:26
 
 Im letzten Befehl eigene Domain, Zertifikatskontakt und persönlichen Benutzernamen einsetzen. Das Skript ersetzt GENERIEREN durch individuelle kryptografische Zufallswerte und gibt keine Geheimnisse aus. Eine bereits initialisierte .env wird nicht überschrieben. Die Datei bei Bedarf ausschließlich lokal mit einem Editor öffnen, nie in Tickets/Logs kopieren.
 
-Pflichtwerte: APP_DOMAIN als DNS-Hostname ohne Schema, Port oder Pfad und TLS_EMAIL. Compose leitet APP_URL und die Login-Origin zur Laufzeit aus APP_DOMAIN ab. Separate POSTGRES_ADMIN_PASSWORD/POSTGRES_PASSWORD und KEYCLOAK_DB_ADMIN_PASSWORD/KEYCLOAK_DB_PASSWORD; DATABASE_URL enthält das URL-kodierte App-Passwort und den internen Host db. SESSION_ENCRYPTION_KEY ist ein 32-Byte-Schlüssel in Hex. OIDC_CLIENT_SECRET schützt den vertraulichen Webclient. KEYCLOAK_ADMIN_USER/PASSWORD sind der IdP-Bootstrapzugang; INITIAL_ADMIN_USERNAME/PASSWORD der persönliche, temporäre Erstzugang. Keine Standardpasswörter ausliefern.
+Zentrale Werte: APP_DOMAIN ohne Schema/Port/Pfad, HTTPS_ENABLED=true|false und ACME_EMAIL. Optional ACME_ENV=staging für Ausstellungstests. Compose-Startskripte leiten APP_URL und Login-Origin zur Laufzeit aus Domain und Protokoll ab. Einzelheiten und interaktiver Assistent: [DOMAIN.md](DOMAIN.md). Separate POSTGRES_ADMIN_PASSWORD/POSTGRES_PASSWORD und KEYCLOAK_DB_ADMIN_PASSWORD/KEYCLOAK_DB_PASSWORD; DATABASE_URL enthält das URL-kodierte App-Passwort und den internen Host db. SESSION_ENCRYPTION_KEY ist ein 32-Byte-Schlüssel in Hex. OIDC_CLIENT_SECRET schützt den vertraulichen Webclient. KEYCLOAK_ADMIN_USER/PASSWORD sind der IdP-Bootstrapzugang; INITIAL_ADMIN_USERNAME/PASSWORD der persönliche, temporäre Erstzugang. Keine Standardpasswörter ausliefern.
 
-Passwörter bestehender PostgreSQL-Volumes werden durch eine Änderung von .env **nicht** rotiert. Erst die jeweilige DB-Rolle kontrolliert ändern und danach die passende Konfiguration ersetzen. Für einen Domainwechsel APP_DOMAIN ändern und den unten dokumentierten identity-config-Schritt ausführen. Ein Clientsecret separat kontrolliert beim IdP und in der Umgebung rotieren; der Realm-Startimport überschreibt vorhandene Clients nicht.
+Passwörter bestehender PostgreSQL-Volumes werden durch eine Änderung von .env **nicht** rotiert. Erst die jeweilige DB-Rolle kontrolliert ändern und danach die passende Konfiguration ersetzen. Für einen Domain-/HTTPS-Wechsel den Assistenten aus DOMAIN.md verwenden. Ein Clientsecret separat kontrolliert beim IdP und in der Umgebung rotieren; der Realm-Startimport überschreibt vorhandene Clients nicht.
 
 ## 3. Frische Installation
 
@@ -67,8 +69,9 @@ sudo docker compose -f compose.server.yml up -d db identity-db
 sudo docker compose -f compose.server.yml run --rm migrate
 sudo docker compose -f compose.server.yml up -d keycloak
 sudo docker compose -f compose.server.yml run --rm bootstrap
-sudo docker compose -f compose.server.yml run --rm identity-config
-sudo docker compose -f compose.server.yml up -d web worker caddy
+chmod +x scripts/configure-domain.sh
+sudo ./scripts/configure-domain.sh
+sudo docker compose -f compose.server.yml up -d worker
 sudo docker compose -f compose.server.yml ps
 ```
 
@@ -84,7 +87,7 @@ Nach Einrichtung einen dauerhaft persönlichen, MFA-geschützten IdP-Verwaltungs
 
 DNS muss vor Caddy-Start auf den Server zeigen (auch einen eventuell vorhandenen AAAA-Eintrag prüfen). TCP 80/443 in Provider-Firewall freigeben. deploy/Caddyfile fordert automatisch ein öffentliches Zertifikat an und leitet HTTP auf HTTPS. /auth/* wird mit erhaltenem Präfix an Keycloak weitergereicht; alle übrigen Anfragen an web:3000. /auth/admin* und der Master-Realm sind öffentlich gesperrt.
 
-Keycloak verwendet den öffentlichen Host APP_URL/auth, intern HTTP im privaten Docker-Netz, und xforwarded-Proxyheader; siehe [Keycloak Reverse Proxy](https://www.keycloak.org/server/reverseproxy). Kein Port 5432 oder 8080 am Host öffnen. APP_URL muss der tatsächlichen HTTPS-Origin entsprechen, sonst schlagen CSRF/OIDC-Prüfungen fehl. Unterdomains im HSTS-Bereich ebenfalls mit HTTPS betreiben.
+Keycloak verwendet den öffentlichen Host APP_URL/auth, intern HTTP im privaten Docker-Netz, und xforwarded-Proxyheader; siehe [Keycloak Reverse Proxy](https://www.keycloak.org/server/reverseproxy). Kein Port 5432 oder 8080 am Host öffnen. APP_URL wird aus Domain und HTTPS-Auswahl abgeleitet und muss der tatsächlichen öffentlichen Origin entsprechen, sonst schlagen CSRF/OIDC-Prüfungen fehl. Unterdomains im HSTS-Bereich ebenfalls mit HTTPS betreiben.
 
 ## 5. Betrieb prüfen
 
@@ -190,39 +193,62 @@ Die Übernahme läuft transaktional, erhält IDs/Nummern/Historiendaten und setz
 
 ## 7. Gemeinsamer CSV-/XLSX-Import
 
-In der Anwendung **Import** öffnen. Vorlagen: /examples/import-vorlage.csv und /examples/import-vorlage.xlsx. Sie enthalten ausschließlich fiktive Daten. Kundenliste und drei-spaltiger MGMT-Export verwenden denselben Dialog.
+Import öffnen; Vorlagen /examples/import-vorlage.csv und /examples/import-vorlage.xlsx enthalten fiktive Daten. /examples/import-ohne-serviceende.csv zeigt eine Datei ohne Datumsspalte.
 
-| Spalte | Pflicht / Format |
+**Pflicht sind nur Name und MAC-Adresse. Serviceende darf vollständig fehlen oder pro Zeile leer sein.** Fehlende Daten werden als SQL-NULL gespeichert, keine Platzhalterdaten. Bei neuen Konten bleibt ein fehlendes Serviceende auch dann leer, wenn Beginn und Paket mitgeliefert wurden. Die Kundennummer wird erst nach Freigabe als sechs Zeichen erzeugt. Die Kundenliste zeigt Serviceende fehlt.
+
+| Spalte | Format |
 |---|---|
-| Name | Pflicht, Service-/Benutzername |
-| MAC-Adresse | Pflicht, gültige MAC oder freie Kennung; Modus wird erkannt und kann korrigiert werden |
-| Serviceende | Pflicht, TT.MM.JJJJ; echte Excel-Datumszelle ebenfalls möglich |
-| Telefon | Optional, Text; lokal z. B. 0676 1234567 oder international +43… |
-| Adresse | Optional, Text |
-| PLZ | Optional, Text, z. B. 00123 |
-| Anbieter | Optional, Art oder 2GO |
-| Paket | Optional, 1, 6, 7, 12 oder 14 |
-| Benutzerzuordnung | Optional, Marko, Mirko oder Satem |
-| Punkte | Optional, Dezimalzahl (Komma oder Punkt) |
-| Servicebeginn | Optional, TT.MM.JJJJ / Excel-Datum |
-| Zahlungsfälligkeit | Optional, TT.MM.JJJJ / Excel-Datum |
-| Zahlungsstatus | Optional, Bezahlt, Unbezahlt oder Unbekannt |
-| Kommentar | Optional, Freitext |
-| MAC-Format | Optional, MAC oder Kennung; überschreibt automatische Erkennung |
+| Name | Pflicht: Service-Benutzername |
+| MAC-Adresse | Pflicht: MAC oder freie Kennung; Prüfart in Vorschau korrigierbar |
+| Serviceende | Optional: TT.MM.JJJJ oder echte Excel-Datumszelle |
+| Telefon | Optionaler Text, lokal oder international |
+| Adresse | Optionaler Text |
+| PLZ | Optionaler Text, z. B. 00123 |
+| Anbieter | Optional: Art oder 2GO |
+| Paket | Optional: 1, 6, 7, 12 oder 14 |
+| Benutzerzuordnung | Optional: Marko, Mirko oder Satem |
+| Punkte | Optional: Dezimalzahl, Komma oder Punkt |
+| Servicebeginn | Optional: TT.MM.JJJJ / Excel-Datum |
+| Zahlungsfälligkeit | Optional: TT.MM.JJJJ / Excel-Datum |
+| Zahlungsstatus | Optional: Bezahlt, Unbezahlt oder Unbekannt; für neue Konten |
+| Kommentar | Optionaler Freitext |
+| MAC-Format | Optional: MAC oder Kennung; leer = Erkennung |
 
-CSV: UTF-8 (BOM erlaubt), Semikolon oder Komma (auch Tab erkannt) als Trennzeichen; Felder mit Trennzeichen/Zeilenumbrüchen in doppelte Anführungszeichen setzen. Telefon und PLZ bereits **vor der Eingabe** in Excel als Text formatieren; verlorene führende Nullen können nicht rekonstruiert werden. Keine Formeln, Links oder Fehlerzellen. Datei maximal 5 MiB, 5.000 Datenzeilen; XLSX-Entpackbudget zusätzlich begrenzt.
+CSV: UTF-8, BOM erlaubt, Semikolon/Komma/Tab erkannt. Telefon und PLZ vor der Excel-Eingabe als Text formatieren. Keine Formeln/Links/Fehlerzellen. Maximal 5 MiB, 5.000 Zeilen; XLSX-Entpackbudget zusätzlich begrenzt.
 
-Beispiel mit nur Pflichtspalten:
+```csv
+Name;MAC-Adresse
+demo.ohneDatum;Service.OhneDatum
+```
+
+Oder gemischt:
 
 ```csv
 Name;MAC-Adresse;Serviceende
-demo.alpen;02:00:00:00:00:01;31.12.2026
-demo.kennung;Service.Alpha;28.02.2027
+demo.alpen;02:00:00:00:00:01;31.12.2027
+demo.ohneDatum;Service.OhneDatum;
 ```
 
-Datei wählen, Spalten zuordnen, Vorschau erzeugen. **Bereits vorhanden**, **Serviceende geändert**, **Neu**, **Prüfung erforderlich** zeigen Anzahl und Details. Bei Stammdatenänderungen wird die Änderungszeile ebenfalls als geändert gezeigt. MACs werden normalisiert, freie Kennungen außen getrimmt und unter Beachtung der Groß-/Kleinschreibung verglichen. Nur Name **und** Kennung gemeinsam ergeben einen eindeutigen Treffer. Konflikte korrigieren oder eindeutig manuell zuordnen und neue Vorschau erzeugen.
+Bei bestehenden Kunden verändert ein fehlendes/leeres Enddatum das gespeicherte Ende nicht. Ein ausgefüllter ungültiger Datumswert ist ein Zeilenfehler. Auch leere sonstige optionale Stammdaten überschreiben nichts. Name und Kennung dienen im normalen Import gemeinsam dem Abgleich. Neue Konten benötigen aktive Auswahl und Bestätigung; die Vorschau schreibt nichts. Wiederholungen erzeugen keine doppelten Konten oder Zeiträume.
 
-Leere optionale Werte überschreiben nichts. Drei Pflichtspalten reichen für neue Konten; fehlende Daten erscheinen als zu ergänzen, Zahlung Unbekannt. Neue Zeilen müssen aktiv ausgewählt werden. Bei geänderten Enddaten ist Zahlungsstatus beibehalten vorausgewählt; pro Zeile oder gesammelt auf Unbezahlt setzen möglich. Vor **Auswahl importieren** Anzahl kontrollieren. Die Vorschau schreibt keine Kundendaten. Gleichzeitige Änderungen führen zu 409 und erfordern eine neue Vorschau. Wiederholte Daten erzeugen keine doppelten Kunden oder Verlängerungen.
+## Nur bestehende Kunden aktualisieren
+
+Im selben Dialog **Nur bestehende Kunden aktualisieren** einschalten. Es werden in diesem Modus keine Konten angelegt; nur Name, Kennung/Prüfart und Serviceende können übernommen werden. Beispiel: /examples/bestehende-kunden-aktualisieren.csv.
+
+| Treffer | Vorschau und Freigabe |
+|---|---|
+| Name und Kennung passen zum selben Konto | Datum setzen/ändern; ohne Datum bleibt es erhalten |
+| Nur Name eindeutig | Alte/importierte Kennung anzeigen; Datum unabhängig übernehmen, MAC nur über eigene Bestätigung |
+| Nur Kennung eindeutig | Alten/importierten Namen anzeigen; Datum unabhängig übernehmen, Name nur über eigene Bestätigung |
+| Felder zeigen auf unterschiedliche Konten / Mehrdeutigkeit | Konflikt; Korrektur oder eindeutige manuelle Klärung vor Freigabe |
+| Kein Treffer | Kein bestehender Kunde gefunden; keine Neuanlage |
+
+MACs werden normalisiert, freie Kennungen außen getrimmt und unter Beachtung der Groß-/Kleinschreibung verglichen; Namen werden getrimmt und ohne Groß-/Kleinschreibung abgeglichen. Doppelte/widersprüchliche Dateiidentitäten bleiben gesperrt.
+
+**Serviceende übernehmen**, **Name aktualisieren** und **MAC-Adresse aktualisieren** sind getrennte Freigaben. Eine Sammelauswahl übernimmt Datumsänderungen, keine Namens-/MAC-Änderungen. Wenn bisher kein Datum vorhanden ist, erscheint **Serviceende erstmals setzen**. Die Vorschau zeigt alle bisherigen/importierten Werte; nicht freigegebene Identitätsänderungen bleiben unverändert. Reine Namens-/Kennungsänderungen verändern weder Zahlung noch Enddatum. Bei einer tatsächlichen Enddatumsänderung bleibt die Zahlung standardmäßig erhalten; auf Unbezahlt setzen ist optional.
+
+Auswahl importieren zeigt die Zahl der Zeilen, Änderungen und übersprungenen Einträge. Der Server klassifiziert die Zuordnung unter Transaktionssperre erneut. Ein Versions-/Trefferkonflikt verlangt eine neue Vorschau. Spätere Enddaten legen eine Verlängerung mit erhaltener Historie an; erstmalige/frühere Enddaten korrigieren den aktuellen Zeitraum. Erneute Daten ohne neue Freigabe erzeugen keine weiteren Verlängerungen.
 
 ## Versand einrichten
 
@@ -236,97 +262,9 @@ Telegram benötigt TELEGRAM_BOT_TOKEN und private TELEGRAM_CHAT_ID; separat eins
 
 Siehe [VERIFICATION.md](VERIFICATION.md). Compose-Konfiguration und PostgreSQL-SQL wurden lokal geprüft. Zusätzlich sind echter PostgreSQL-Dump, Download, Restore in eine zweite native Testdatenbank und Caddy-HTTPS mit Test-CA geprüft (siehe Prüfprotokoll). Ein vollständiger Container-Erststart war auf diesem Windows-Rechner mangels laufender Docker-Engine/Virtualisierung nicht möglich. Die obige Linux-Installation einschließlich öffentlicher TLS-Zertifikate und Restore muss auf dem Zielserver abgenommen werden.
 
-## Domain nachträglich wechseln – ohne Build oder Datenbankmigration
+## Öffentliche Domain, HTTPS und Rückkehr
 
-Ab Release 0.3.0 ist **APP_DOMAIN** die einzige öffentliche Hosteinstellung in der Server-.env. Compose leitet APP_URL=https://APP_DOMAIN, OIDC_ISSUER, Keycloak-Hostname und Caddy-Adresse daraus ab. APP_URL bleibt intern eine Laufzeitvariable für Login-Callback und CSRF-Origin. Keine NEXT_PUBLIC- oder beim Build fest eingebrannten Domainwerte.
-
-Bei der einmaligen Aktualisierung eines älteren Deployments die neuen Dateien übernehmen und das neue Image regulär bauen. **Spätere Domainwechsel benötigen weder Image-Neubau noch Schema-Migration.** Bestehende Keycloak-Realms übernehmen geänderte Client-URLs nicht aus dem Startimport; deshalb ist identity-config zwingend.
-
-### DNS und Ports
-
-Beim DNS-Anbieter einen A-Eintrag für die gewünschte Domain auf die öffentliche IPv4 des Servers setzen. Einen AAAA-Eintrag nur mit tatsächlich erreichbarer IPv6 setzen; veraltete AAAA-Einträge entfernen. Für kunden.example.at ist das typischerweise Typ A, Name kunden, Wert SERVER-IP in der Zone example.at. Vor dem Wechsel TTL rechtzeitig absenken. TCP **80 und 443** müssen den Caddy-Server erreichen; 5432/8080 bleiben intern.
-
-DNS-Anbieter haben unterschiedliche APIs. Ohne bekannten Anbieter und Zugangsdaten kann das Projekt keinen allgemeingültigen Anbieterbefehl ausführen. Die folgende Variante ist ein **konkretes RFC-2136-Beispiel**, falls der Anbieter dynamische DNS-Updates mit TSIG unterstützt; alle Beispielwerte und den Schlüsselpfad ersetzen:
-
-```bash
-set -e
-sudo apt install -y dnsutils
-NEW_DOMAIN=kunden.neu.example.at
-SERVER_IPV4=203.0.113.10
-DNS_ZONE=example.at
-DNS_SERVER=ns1.example.at
-nsupdate -k /root/dns-provider.key <<EOF
-server $DNS_SERVER
-zone $DNS_ZONE
-update delete $NEW_DOMAIN A
-update add $NEW_DOMAIN 60 A $SERVER_IPV4
-send
-EOF
-dig +short A "$NEW_DOMAIN"
-dig +short AAAA "$NEW_DOMAIN"
-```
-
-203.0.113.10 ist eine Dokumentationsadresse. Andernfalls den Eintrag im Anbieterportal bzw. mit dessen CLI/API ändern und mit den beiden dig-Befehlen prüfen. Bei proxied DNS zusätzlich den Proxy-Modus/TLS des Anbieters berücksichtigen; die direkte Caddy-Anleitung setzt auf den Server auflösenden DNS voraus.
-
-### Bestehende Domain auf neue Domain umstellen
-
-Auf dem Server, im vorhandenen Projektverzeichnis. NEW_DOMAIN durch die vorbereitete echte Domain ersetzen. Die Sicherung der .env enthält Geheimnisse und bleibt nur für den Serverbenutzer lesbar.
-
-```bash
-set -e
-cd /opt/kundenraum
-NEW_DOMAIN=kunden.neu.example.at
-dig +short A "$NEW_DOMAIN"
-dig +short AAAA "$NEW_DOMAIN"
-umask 077
-cp .env ".env.before-domain-$(date -u +%Y%m%dT%H%M%SZ)"
-if grep -q '^APP_DOMAIN=' .env; then
-  sed -i "s/^APP_DOMAIN=.*/APP_DOMAIN=$NEW_DOMAIN/" .env
-else
-  printf '\nAPP_DOMAIN=%s\n' "$NEW_DOMAIN" >> .env
-fi
-sed -i '/^PUBLIC_DOMAIN=/d; /^APP_URL=/d' .env
-chmod 600 .env
-sudo docker compose -f compose.server.yml config --quiet
-sudo docker compose -f compose.server.yml stop caddy web
-sudo docker compose -f compose.server.yml up -d --no-deps --force-recreate keycloak
-sudo docker compose -f compose.server.yml run --rm identity-config
-sudo docker compose -f compose.server.yml up -d --no-deps --force-recreate web caddy
-sudo docker compose -f compose.server.yml ps
-curl --fail --silent --show-error "https://$NEW_DOMAIN/api/v1/health"
-curl --fail --silent --show-error "https://$NEW_DOMAIN/auth/realms/kundenraum/.well-known/openid-configuration"
-curl --silent --output /dev/null --write-out '%{http_code}\n' "https://$NEW_DOMAIN/kunden"
-sudo docker compose -f compose.server.yml logs --tail=60 caddy keycloak web
-```
-
-identity-config wartet auf Keycloak und benötigt einen **gültigen internen IdP-Wartungszugang** in KEYCLOAK_ADMIN_USER/PASSWORD. Ein bereits deaktiviertes Bootstrapkonto reicht nicht. Der Befehl aktualisiert ausschließlich den bestehenden kundenraum-web-Client mit exaktem Callback https://NEUE-DOMAIN/api/auth/callback, erlaubter Origin und Logout-Ziel sowie das Realm-Frontend. Er erhält Clientsecret, Rollen, Benutzer, Passwörter und OTP und beendet alte IdP-Sitzungen. Scheitert der Abgleich, die Webfreigabe erst nach Behebung fortsetzen; keinen Realm löschen oder neu importieren.
-
-Der Worker benötigt keine neue Domain und muss dafür nicht neu erstellt werden. Caddy fordert das neue Zertifikat automatisch an; Zertifikate bleiben im persistenten caddy-data-Volume. Bei DNS-/ACME-Fehlern DNS, AAAA und Ports prüfen. Ein einfaches docker compose restart liest geänderte Container-Umgebungsvariablen **nicht** ein – deshalb force-recreate.
-
-Im Browser https://NEUE-DOMAIN/kunden öffnen, Passwort/OTP eingeben und Rücksprung zur Kundenliste prüfen. Die Discovery-Antwort muss den neuen HTTPS-Issuer enthalten; das Login darf nicht auf die alte Domain zurückspringen. Ein anonymes /kunden leitet zum Login, /api/v1/customers liefert 401. Alte Bookmarks aktualisieren. Für Rückkehr zur alten Domain dieselben Schritte mit der alten APP_DOMAIN wiederholen.
-
-Ein separat eingerichteter iOS-/Fremdclient hat eigene Callback-/Universal-Link-URLs. Diese bewusst beim Identity Provider und in der jeweiligen App-Konfiguration aktualisieren; identity-config verändert solche Redirects nicht und aktiviert den vorbereiteten iOS-Client nicht.
-
-Referenzen: [Keycloak-Hostname](https://www.keycloak.org/server/hostname), [Caddy-Umgebungsvariablen](https://caddyserver.com/docs/caddyfile/concepts#environment-variables).
-
-## Nur bestehende Kunden gesammelt aktualisieren
-
-Im vorhandenen Importdialog **Nur bestehende Kunden aktualisieren** aktivieren. Beispiel: [bestehende-kunden-aktualisieren.csv](../public/examples/bestehende-kunden-aktualisieren.csv); die Beispielnamen sind fiktiv und müssen für einen echten Treffer zu vorhandenen Servicekonten passen.
-
-```csv
-Name;MAC-Adresse;Serviceende
-bestehend.alpen;02:00:00:00:00:01;31.12.2027
-bestehend.kennung;Service.Neu;28.02.2028
-```
-
-Pflichtspalten Name (Service-Benutzername), MAC-Adresse (auch freie Kennung) und Serviceende (TT.MM.JJJJ). CSV als UTF-8, Semikolon/Komma/Tab wie im allgemeinen Import. Die vorhandene XLSX-Unterstützung bleibt ebenfalls verfügbar. Dieser Modus ändert ausschließlich Kennung/Prüfart und Serviceende; weitere Stammdatenspalten werden nicht überschrieben.
-
-- Eindeutiger Benutzername plus identische normalisierte MAC/Kennung: alte/neue Enddaten nebeneinander; eindeutige Enddatumsänderungen können gesammelt ausgewählt werden.
-- Eindeutiger Benutzername und andere MAC/Kennung: alte und neue Kennung sowie Enddaten anzeigen. **MAC-Adresse für diesen Kunden aktualisieren?** pro Zeile aktivieren, danach diese Zeile ausdrücklich auswählen. Die Sammelauswahl erteilt keine MAC-Freigabe.
-- Mehrdeutiger Benutzername: manuell eindeutig zuordnen oder Daten korrigieren und neue Vorschau erzeugen. Eine anderswo belegte neue Kennung und widersprüchliche/doppelte Dateizeilen bleiben gesperrt; keine automatische Umverteilung.
-- **Kein Treffer**: keine Anlage, auch nicht bei direkt manipulierter API-Freigabe. **Unverändert**: keine Speicherung.
-- Zahlung bleibt standardmäßig erhalten. Bei geändertem Ende kann auf Unbezahlt gesetzt werden. Ein reiner Kennungswechsel ändert den Zahlungsstatus nicht.
-- Vorschau schreibt nichts. Speichern prüft Treffer, Kennungsbelegung und Versionen erneut und speichert die freigegebenen Änderungen transaktional. Identische Folgeimporte erzeugen keine zusätzlichen Verlängerungen.
+Die aktuelle Anleitung einschließlich interaktivem Einrichtungsbefehl, explizitem Let’s Encrypt, DNS-Prüfung, Staging, Zertifikatsablauf und Rückkehr steht in [DOMAIN.md](DOMAIN.md). Sie ersetzt die früheren manuellen .env-/identity-config-Schritte. Nach einem einmaligen Update auf dieses Release brauchen spätere Domain-/HTTPS-Wechsel keinen Build und keine Migration.
 
 ## PostgreSQL-Backup aus der Weboberfläche
 
@@ -374,3 +312,18 @@ sudo docker compose -f compose.server.yml ps
 ```
 
 Danach neu anmelden und Konten, Historie, Zahlung, anonyme API-Verweigerung sowie Worker prüfen. Keine Benutzerpasswörter durch bootstrap zurücksetzen. [pg_dump/Custom-Format](https://www.postgresql.org/docs/17/app-pgdump.html), [pg_restore](https://www.postgresql.org/docs/17/app-pgrestore.html).
+
+## Einmaliges Update auf die Domain-/Import-Erweiterung
+
+Vorher Wartungssicherung aus Abschnitt 6 erstellen. Neue Quelldateien übernehmen, .env und Volumes erhalten, APP_VERSION in .env auf 0.4.0 setzen. Das neue Image einmal regulär bauen; spätere Domain-/HTTPS-Wechsel verwenden ausschließlich den Assistenten.
+
+```bash
+set -e
+cd /opt/kundenraum
+sed -i 's/^APP_VERSION=.*/APP_VERSION=0.4.0/' .env
+sudo docker compose -f compose.server.yml stop caddy web worker
+sudo docker compose -f compose.server.yml build web
+chmod +x scripts/configure-domain.sh
+sudo ./scripts/configure-domain.sh
+sudo docker compose -f compose.server.yml up -d worker
+```
