@@ -105,6 +105,7 @@ if(!users.length){const password=randomBytes(24).toString('base64url');await adm
   console.log('Persönlicher Erstzugang angelegt. Temporäres Passwort: .runtime/dev-access.txt (wird nicht protokolliert).');
 }else console.log('Vorhandenes persönliches Login-Konto unverändert beibehalten: '+username);
 if(!await healthy(config.APP_URL+'/api/v1/me')){launch('web',process.execPath,['node_modules/next/dist/bin/next','dev','--hostname','127.0.0.1','--port','3000'],{NEXT_DIST_DIR:'.next-dev'});await ready(config.APP_URL+'/api/v1/me',90);}
-let workerAlive=false;try{if(processes.worker?.pid){process.kill(processes.worker.pid,0);workerAlive=true;}}catch{}
-if(!workerAlive)launch('worker',process.execPath,['--import','tsx','scripts/worker.ts']);
+const workerScript=path.join(root,'scripts/worker.ts');
+let workerAlive=false;if(processes.worker?.pid)workerAlive=await new Promise(resolve=>{const check=spawn('powershell.exe',['-NoProfile','-NonInteractive','-File',path.join(root,'scripts/local-worker-matches.ps1'),'-ProcessIdToCheck',String(processes.worker.pid),'-ExpectedScript',workerScript],{stdio:'ignore',windowsHide:true});check.on('error',()=>resolve(false));check.on('exit',code=>resolve(code===0));});
+if(!workerAlive)launch('worker',process.execPath,['--import','tsx',workerScript]);
 console.log('BEREIT: http://localhost:3000 · Anmeldung: http://localhost:3000/auth · Worker gestartet.');

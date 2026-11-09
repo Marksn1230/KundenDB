@@ -83,3 +83,20 @@ spec.components.schemas.Settings.required.push('default_country');
 Object.assign(spec.components.schemas.UnpaidItem.properties,spec.components.schemas.Period.properties);
 spec.components.schemas.Report.properties.periods=array(object({...spec.components.schemas.Period.properties,customer:ref('Customer')}));
 spec.components.schemas.Report.required.push('periods');
+
+spec.components.schemas.ImportRequest.properties.mode={type:'string',enum:['all','existing_only'],default:'all',description:'existing_only aktualisiert ausschließlich vorhandene Konten anhand des Benutzernamens. Keine Neuanlagen; Kennungswechsel brauchen approve_mac pro Zeile.'};
+spec.components.schemas.ImportPreview.properties.mode={type:'string',enum:['all','existing_only']};
+spec.components.schemas.ImportPreview.required.push('mode');
+spec.components.schemas.ImportPreview.properties.counts.properties.unmatched=integer;
+spec.components.schemas.ImportPreview.properties.counts.required.push('unmatched');
+spec.components.schemas.ImportRow.properties.category.enum.push('unmatched');
+Object.assign(spec.components.schemas.ImportRow.properties,{previous_mac:str,previous_mac_mode:{enum:['mac','identifier']},requires_mac_approval:{type:'boolean'}});
+spec.paths['/imports/commit'].post.requestBody.content['application/json'].schema.properties.selection.items.properties.approve_mac={const:true,description:'Nur explizit für diese Zeile bestätigen. Bei abweichender Kennung im Aktualisierungsmodus zwingend.'};
+const backupJob=object({id:{type:'string',format:'uuid'},status:{enum:['running','ready','failed','downloading']},filename:str,expires_at:{type:'string',format:'date-time'},bytes:integer,error:str},['id','status','filename','expires_at']);
+spec.components.schemas.BackupJob=backupJob;
+spec.paths['/backups']={
+ get:{...op('Backup-Verfügbarkeit; nur persönliche Administratorsitzung',object({available:{type:'boolean'},reason:{type:['string','null']}}),undefined,true),security:[{sessionCookie:[]}]},
+ post:{...op('PostgreSQL-Dump asynchron erstellen; höchstens 3/15 Minuten pro Administrator',ref('BackupJob'),object({}),true),security:[{sessionCookie:[]}],responses:{202:response(ref('BackupJob'),'Backup gestartet'),...errors}}
+};
+spec.paths['/backups/{backup_id}']={parameters:[{name:'backup_id',in:'path',required:true,schema:{type:'string',format:'uuid'}}],get:{...op('Status ausschließlich für erstellenden Administrator',ref('BackupJob'),undefined,true),security:[{sessionCookie:[]}]}};
+spec.paths['/backups/{backup_id}/download']={parameters:[{name:'backup_id',in:'path',required:true,schema:{type:'string',format:'uuid'}}],get:{summary:'Einmaliger geschützter PostgreSQL-Custom-Dump-Download; Datei anschließend entfernen',security:[{sessionCookie:[]}],responses:{200:{description:'Dump für pg_restore; Dateiname über Content-Disposition',content:{'application/octet-stream':{schema:{type:'string',format:'binary'}}}},...errors}}};

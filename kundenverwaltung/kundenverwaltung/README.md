@@ -83,3 +83,11 @@ npm audit
 ```
 
 Für isolierte Builds neben laufendem Devserver NEXT_DIST_DIR=.next-verify setzen; denselben Wert für HTTP-Tests verwenden. Tests verwenden ausschließlich fiktive Daten und separate temporäre Datenbanken. [Prüfprotokoll](docs/VERIFICATION.md) und [ASVS-Kontrollen](docs/SECURITY.md) unterscheiden lokale Nachweise und ausstehende Zielserver-/Integrationsprüfungen. HTTPS, Domain, Backups und echte Versandzugänge müssen für Produktion eingerichtet werden.
+
+## Erweiterung 0.3: Domainwechsel, Aktualisierungsimport und Backups
+
+Server-.env verwendet APP_DOMAIN als einzige öffentliche Hosteinstellung. Caddy, App-URL und Issuer werden zur Laufzeit daraus abgeleitet. Bei einem Domainwechsel Container neu erstellen und den vorhandenen Keycloak-Client über identity-config abgleichen; kein Build und keine Schema-Migration. Exakte DNS-/HTTPS-/Callback-Schritte: [Serveranleitung](docs/SERVER.md#domain-nachträglich-wechseln--ohne-build-oder-datenbankmigration).
+
+Der Import bietet Nur bestehende Kunden aktualisieren mit Einzelzustimmung für MAC-/Kennungswechsel. Kein Treffer legt nichts an. [Beispiel-CSV](public/examples/bestehende-kunden-aktualisieren.csv). Die Kundenliste hat einen kompakten Geldschein-/Häkchenbutton Als bezahlt markieren für unbezahlte/unbekannte aktuelle Zeiträume.
+
+Administratoren können unter Einstellungen → Datenbank-Backup PostgreSQL-Custom-Dumps erstellen und einmalig herunterladen. Temporäre Dateien laufen nach 15 Minuten ab; Keycloak benötigt weiterhin die separate Serversicherung. Download, Zugriffsschutz, Ablauf und Restore werden bei vorhandenen PostgreSQL-/Caddy-Binaries in tests/backup-postgres.test.ts gegen echte Prozesse geprüft. TEST_PG_BIN und TEST_CADDY_BINARY können eigene Testinstallationen benennen; ohne diese Binaries wird dieser Integrationstest ausdrücklich übersprungen.

@@ -42,3 +42,9 @@ Referenzen: [Keycloak-Administration einschließlich MFA und Passwortpolitik](ht
 ## Erweiterung November 2026
 
 Anmeldung unter derselben Origin im vorhandenen Layout; keine Passwortannahme durch die App und kein Passwortgrant für persönliche Logins. Validierte interne Rücksprünge, Sitzungskontrolle vor Kundendatenzugriff. Administrative Vergabe/Reset ohne Passwort in Antwort oder Audit. Massenfreigaben sind login- und versionsgebunden; WhatsApp verlangt Admin und alle bestehenden Versandprüfungen. PostgreSQL nutzt Nicht-Superuser-Rollen, explizite Migrationen und gemeinsame Transaktionssperren. Nur Caddy veröffentlicht Ports, IdP-Admin/Master bleiben intern. Container-Neuinstallation, TLS, Restore und unabhängige vollständige ASVS-L2-Abnahme bleiben Zielserveraufgaben.
+
+## Erweiterung 0.3
+
+Backup-APIs verlangen Administratorrolle/MFA und persönliche Cookie-Sitzung; Bearerzugriffe sind ausgeschlossen. Erstellung ist CSRF-/Origin- und ratenbegrenzt. Zufällige Job-IDs sind an den erstellenden Login gebunden; keine öffentlichen Downloadtokens. Geschützte temporäre Verzeichnisse, Pfadprüfung vor Bereinigung, Ablauf nach 15 Minuten, Einmalkonsum. pg_dump verwendet libpq-Umgebungsvariablen, keine Credentials in argv/Browser/Audit; rohe Prozessfehler werden verworfen und nur feste Fehlerkategorien protokolliert. Der Dump enthält sensible Kundendaten und technische Sitzungstabellen, keine PostgreSQL-Rollenpasswörter; vertraulich aufbewahren.
+
+Aktualisierungsimporte verlangen MAC-Zustimmung pro Zeile auch auf dem Server; keine implizite Neuanlage und keine automatische Fremdzuordnung. Commit klassifiziert unter derselben Transaktionssperre erneut. APP_DOMAIN wird durch Compose fest vorgegeben, kein Ableiten vertrauenswürdiger Origins aus eingehenden Host-Headern. identity-config erhält die Sicherheitskonfiguration und ersetzt nur die erlaubten Web-Ziele/Realm-Frontendadresse.

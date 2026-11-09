@@ -61,7 +61,7 @@ export async function rateLimit(key: string, max = 20, interval = 900000) {
         }>('SELECT attempts FROM rate_limits WHERE key=?', key);
         if (r && r.attempts >= max)
             fail('Zu viele Versuche. Bitte später erneut versuchen.', 429);
-        await run('INSERT INTO rate_limits(key,attempts,reset_at) VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET attempts=attempts+1', key, Date.now() + interval);
+        await run('INSERT INTO rate_limits(key,attempts,reset_at) VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET attempts=rate_limits.attempts+1', key, Date.now() + interval);
     });
 }
 export async function login(returnTo='/') {

@@ -9,7 +9,7 @@ Stand: **09.11.2026**, Windows/PowerShell, Node.js **26.13.0**, Next.js **16.4.5
 | npm run check | TypeScript ohne Fehler |
 | NEXT_DIST_DIR=.next-verify npm run build | Produktionsbuild erfolgreich; separat vom laufenden Devserver |
 | npm run api:export + Swagger Parser im HTTP-Test | OpenAPI 3.1 strukturell gültig, neue Modelle exportiert |
-| NEXT_DIST_DIR=.next-verify npm test | **33 Tests bestanden**, 0 Fehler, 0 übersprungen (inklusive Untertests) |
+| NEXT_DIST_DIR=.next-verify npm test | **41 Tests bestanden**, 0 Fehler, 0 übersprungen (inklusive Untertests) |
 | npm audit --audit-level=low | **0 bekannte Schwachstellen** im dokumentierten Lauf |
 | docker compose --env-file deploy/.env.example -f compose.server.yml config --quiet | Serverkonfiguration ohne Fehler aufgelöst; Geheimnisse nicht ausgegeben |
 | Frische PostgreSQL-Engine mit PGlite | Schema, SQL-Adapter, Kalenderdaten, freie Kennung, Importfreigabe, Zahlung und Rollback erfolgreich |
@@ -20,7 +20,7 @@ Stand: **09.11.2026**, Windows/PowerShell, Node.js **26.13.0**, Next.js **16.4.5
 | Chrome Desktop 1440 × 1000 | Login, Übersicht, Suche, Laufzeitvorschau, Importfreigabe, Reports |
 | Chrome Smartphone 390 × 844 | Integriertes Login, Navigation, Übersicht, Kundenliste ohne horizontalen Seitenüberlauf |
 
-PGlite ist eine echte eingebettete PostgreSQL-Engine. Damit wurden PostgreSQL-Schema und SQL geprüft, **kein PostgreSQL-Container und keine TCP-Verbindung eines laufenden pg-Pools**. Der separate Pool verwendet denselben SQL-Adapter; dessen Docker-Netzverbindung bleibt auf dem Zielserver zu prüfen.
+PGlite ist eine echte eingebettete PostgreSQL-Engine. Damit wurden PostgreSQL-Schema und SQL geprüft, **kein PostgreSQL-Container**. Zusätzlich wurde der pg-Pool inzwischen gegen einen isolierten nativen PostgreSQL-17.11-Server per TCP geprüft. Die Docker-Netzverbindung bleibt mangels Engine auf dem Zielserver zu prüfen.
 
 ## Fachliche und sicherheitsrelevante Nachweise
 
@@ -59,3 +59,21 @@ Auch Desktop-/Smartphone-Login im bestehenden Design und Rücksprung auf /kunden
 **iOS:** kein nativer Client geliefert. OIDC-Client kundenraum-ios ist vorbereitet und deaktiviert; echte Bundle-/Universal-Link-Redirects, Systembrowser-/Schlüsselbundanbindung, Logout und Token-Erneuerung bleiben für das Folgeprojekt.
 
 **Sicherheit:** umgesetzte Kontrollen siehe SECURITY.md. Keine unabhängige vollständige ASVS-Level-2-Zertifizierung; Zielserver-TLS, Last-/Fuzzprüfung, Recovery und externe Auditaufbewahrung bleiben offen.
+
+## Abnahme Erweiterung 0.3 – 09.11.2026
+
+Repository: Branch master, Tracking-Remote orgin/master (https://github.com/Marksn1230/KundenDB). Ausgangsstand dcc4359. Keine vorhandenen Arbeitskopieänderungen vor Beginn. Der GitHub-Standardbranch main wurde beim Fetch zusätzlich erkannt; umgesetzt wird auf dem bereits aktiven und verfolgten master.
+
+Produktionsbuild .next-verify erfolgreich. Vollständige Suite: **41 bestanden, 0 Fehler, 0 übersprungen**. npm audit: 0 bekannte Schwachstellen. Server-Compose-Konfiguration mit APP_DOMAIN und individuellen Testgeheimnissen erfolgreich validiert.
+
+Neue Nachweise: Benutzername/MAC identisch oder abweichend, individuelle MAC-Zustimmung serverseitig und im Browser, Sammelfreigabe ohne implizite Kennungsänderung, Fremdbelegung/Mehrdeutigkeit/Dateikonflikte, kein Treffer ohne Neuanlage, reiner Kennungswechsel ohne Zahlungsänderung, Wiederholbarkeit und Schutz gegen zwischenzeitliche Belegung. Kompakter Geldschein-/Häkchenbutton aktualisiert die sichtbare Zahlung und verschwindet nach Bezahlt. Zwei Domainwechsel gegen isolierten Keycloak-Verwaltungsfixture prüfen exakte Callback-/Origin-/Frontend-URLs und erhaltene übrige Konfiguration.
+
+Echter PostgreSQL-17.11-Server auf Loopback mit zufälligem Passwort und temporärem Cluster, eigener Quell- und Restore-Datenbank. pg_dump-Custom-Datei aus der Admin-Session heruntergeladen, in zweite Datenbank mit pg_restore restauriert und fiktive Kunden-/Kennungs-/Zahlungsdaten verglichen. Zusätzlich UI-Button mit automatischem Download, andere Admin-Identität 404, Mitarbeiter 403, anonym 401, Bearer 403, Einmaligkeit, Audit, Ablauf und fehlende pg_dump-Binary geprüft. Keine DB-Credentials in Antworten/Audit. Der isolierte Cluster wird gestoppt und das neue Testverzeichnis bereinigt.
+
+HTTPS-Prüfung mit echtem portablem Caddy 2.11.9: eigener HTTPS-Listener und /auth-Proxy, isolierte interne CA, keine Installation in den Windows-Zertifikatsspeicher. Node-HTTPS-Anfragen validieren die Zertifikatskette ausdrücklich gegen diese CA; der Headless-Browser akzeptiert sie nur im isolierten Testkontext. OIDC/PKCE-Anmeldung mit signiertem Testprovider hinter diesem Proxy und Secure-Cookie erfolgreich. Dies prüft kein öffentliches ACME-Zertifikat und keine produktive DNS-Umschaltung. Der echte lokale Keycloak-/MFA-Ablauf wurde separat geprüft und ist oben dokumentiert.
+
+Realer Docker-Startversuch: docker compose --env-file .runtime/compose-test.env -p kundenraum-abnahme -f compose.server.yml up -d --build. **Blockiert**, bevor Containerstart/Build möglich ist: DockerDesktopLinuxEngine-Pipe fehlt; keine laufende Linux-Docker-Engine erreichbar. Keine BIOS-, Virtualisierungs- oder Docker-Konfiguration wurde verändert. APP_DOMAIN für einen echten Server und Provider-DNS-Zugang sind nicht vorgegeben; kein öffentlicher DNS-Eintrag wurde verändert. Die erreichbare lokale Ausweichumgebung wird mit npm run dev:full unter http://localhost:3000 gestartet. Sie erhält vorhandene SQLite-Kundendaten und persönliche Keycloak-Konten; der PostgreSQL-Backupbutton ist dort bewusst nicht verfügbar. Ein dauerhaftes PostgreSQL-/HTTPS-Serverdeployment muss nach Bereitstellung einer Docker-Engine erfolgen.
+
+Neue Bildschirmnachweise: test-results/import-existing-desktop.png, test-results/backup-admin-https.png (ausschließlich fiktive Testdaten). Reproduzierbarer nativer Test: TEST_PG_BIN auf PostgreSQL-bin und TEST_CADDY_BINARY auf die Caddy-Datei setzen, anschließend NEXT_DIST_DIR=.next-verify npm test. Ohne Binaries wird der optionale Prozessintegrationstest ausdrücklich als übersprungen ausgegeben.
+
+Abschließender lokaler Dienstcheck: Web-Health 200, anonyme Kunden-API 401, echtes Keycloak-Loginformular unter http://localhost:3000/auth erreichbar. Der lokale Starter prüft jetzt zusätzlich den absoluten Worker-Skriptpfad statt nur einer möglicherweise wiederverwendeten Windows-Prozess-ID. Worker neu gestartet, aktueller Heartbeat und erneuter Starteraufruf ohne Doppelstart geprüft.

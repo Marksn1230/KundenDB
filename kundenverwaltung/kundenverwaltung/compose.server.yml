@@ -60,13 +60,13 @@
         "KC_DB_URL": "jdbc:postgresql://identity-db:5432/keycloak",
         "KC_DB_USERNAME": "keycloak",
         "KC_DB_PASSWORD": "${KEYCLOAK_DB_PASSWORD:?KEYCLOAK_DB_PASSWORD setzen}",
-        "KC_HOSTNAME": "${APP_URL:?APP_URL setzen}/auth",
+        "KC_HOSTNAME": "https://${APP_DOMAIN:?APP_DOMAIN setzen}/auth",
         "KC_HTTP_ENABLED": "true",
         "KC_HTTP_RELATIVE_PATH": "/auth",
         "KC_PROXY_HEADERS": "xforwarded",
         "KC_BOOTSTRAP_ADMIN_USERNAME": "${KEYCLOAK_ADMIN_USER:-bootstrap}",
         "KC_BOOTSTRAP_ADMIN_PASSWORD": "${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD setzen}",
-        "APP_URL": "${APP_URL:?APP_URL setzen}",
+        "APP_URL": "https://${APP_DOMAIN:?APP_DOMAIN setzen}",
         "OIDC_CLIENT_SECRET": "${OIDC_CLIENT_SECRET:?OIDC_CLIENT_SECRET setzen}"
       },
       "volumes": [
@@ -81,14 +81,14 @@
       "restart": "unless-stopped"
     },
     "web": {
-      "image": "kundenraum:${APP_VERSION:-0.2.0}",
+      "image": "kundenraum:${APP_VERSION:-0.3.0}",
       "build": ".",
       "environment": {
         "NODE_ENV": "production",
-        "APP_URL": "${APP_URL:?APP_URL setzen}",
+        "APP_URL": "https://${APP_DOMAIN:?APP_DOMAIN setzen}",
         "DATABASE_URL": "${DATABASE_URL:?DATABASE_URL setzen}",
         "SESSION_ENCRYPTION_KEY": "${SESSION_ENCRYPTION_KEY:?SESSION_ENCRYPTION_KEY setzen}",
-        "OIDC_ISSUER": "${APP_URL:?APP_URL setzen}/auth/realms/kundenraum",
+        "OIDC_ISSUER": "https://${APP_DOMAIN:?APP_DOMAIN setzen}/auth/realms/kundenraum",
         "OIDC_INTERNAL_URL": "http://keycloak:8080/auth",
         "OIDC_ADMIN_URL": "http://keycloak:8080/auth/admin/realms/kundenraum",
         "OIDC_CLIENT_ID": "kundenraum-web",
@@ -127,7 +127,7 @@
       "restart": "unless-stopped"
     },
     "worker": {
-      "image": "kundenraum:${APP_VERSION:-0.2.0}",
+      "image": "kundenraum:${APP_VERSION:-0.3.0}",
       "command": [
         "npm",
         "run",
@@ -166,7 +166,7 @@
     "caddy": {
       "image": "caddy:2.11.9-alpine",
       "environment": {
-        "PUBLIC_DOMAIN": "${PUBLIC_DOMAIN:?PUBLIC_DOMAIN setzen}",
+        "APP_DOMAIN": "${APP_DOMAIN:?APP_DOMAIN setzen}",
         "TLS_EMAIL": "${TLS_EMAIL:?TLS_EMAIL setzen}"
       },
       "ports": [
@@ -188,7 +188,7 @@
       "profiles": [
         "tools"
       ],
-      "image": "kundenraum:${APP_VERSION:-0.2.0}",
+      "image": "kundenraum:${APP_VERSION:-0.3.0}",
       "command": [
         "npm",
         "run",
@@ -210,7 +210,7 @@
       "profiles": [
         "tools"
       ],
-      "image": "kundenraum:${APP_VERSION:-0.2.0}",
+      "image": "kundenraum:${APP_VERSION:-0.3.0}",
       "command": [
         "node",
         "scripts/bootstrap-identity.mjs"
@@ -222,6 +222,25 @@
         "KEYCLOAK_ADMIN_PASSWORD": "${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD setzen}",
         "INITIAL_ADMIN_USERNAME": "${INITIAL_ADMIN_USERNAME:?INITIAL_ADMIN_USERNAME setzen}",
         "INITIAL_ADMIN_PASSWORD": "${INITIAL_ADMIN_PASSWORD:?INITIAL_ADMIN_PASSWORD setzen}"
+      },
+      "depends_on": [
+        "keycloak"
+      ]
+    },
+    "identity-config": {
+      "profiles": [
+        "tools"
+      ],
+      "image": "kundenraum:${APP_VERSION:-0.3.0}",
+      "command": [
+        "node",
+        "scripts/sync-domain.mjs"
+      ],
+      "environment": {
+        "APP_DOMAIN": "${APP_DOMAIN:?APP_DOMAIN setzen}",
+        "OIDC_INTERNAL_URL": "http://keycloak:8080/auth",
+        "KEYCLOAK_ADMIN_USER": "${KEYCLOAK_ADMIN_USER:-bootstrap}",
+        "KEYCLOAK_ADMIN_PASSWORD": "${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD setzen}"
       },
       "depends_on": [
         "keycloak"

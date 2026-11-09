@@ -40,7 +40,7 @@ test('MGMT: bereits vorhanden, Ende geändert, neu und Konflikt; Vorschau schrei
     await make('Beta', '02:00:00:00:02:02');
     const before = (await everyCustomer()).length;
     const p = await makePreview(mgmt([{ Name: 'ALPHA', MAC: '020000000201', Ende: '28.02.2026' }, { Name: ' beta ', MAC: '02-00-00-00-02-02', Ende: '31.12.2026' }, { Name: 'Gamma', MAC: '02:00:00:00:02:03', Ende: '31.12.2026' }, { Name: 'Nummer', MAC: '02:00:00:00:02:04', Ende: '31.12.2026' }]), actor);
-    assert.deepEqual(p.counts, { existing: 1, changed: 1, new: 1, review: 1 });
+    assert.deepEqual(p.counts, { existing: 1, changed: 1, new: 1, review: 1, unmatched: 0 });
     assert.equal(p.rows[0].customer_number, c.customer_number);
     assert.equal((await everyCustomer()).length, before);
     const skip = await commitImport({ preview_id: p.id, selection: [] }, actor);

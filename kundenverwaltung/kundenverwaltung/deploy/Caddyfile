@@ -1,7 +1,7 @@
 {
  email {$TLS_EMAIL}
 }
-{$PUBLIC_DOMAIN} {
+{$APP_DOMAIN} {
  encode zstd gzip
  @privateIdentity path /auth/admin* /auth/realms/master*
  respond @privateIdentity 404

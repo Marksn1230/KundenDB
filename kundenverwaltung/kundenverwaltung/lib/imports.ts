@@ -11,9 +11,9 @@ export const importFields=['name','mac_address','service_end','phone','postal_co
 export type ImportField=typeof importFields[number];
 export type RawRow=Record<string,string>;
 export type ImportProfile='unified'|'mgmt'|'customers';
-export type PreviewRow={index:number;category:'existing'|'changed'|'new'|'review';reason?:string;data:Record<string,unknown>;customer_id?:number;customer_number?:string;previous_end?:string|null;version?:number;fingerprint:string};
-export type Preview={id:string;profile:ImportProfile;rows:PreviewRow[];counts:Record<PreviewRow['category'],number>};
-export const previewInput=z.object({profile:z.enum(['unified','mgmt','customers']).default('unified'),rows:z.array(z.record(z.string().max(160),z.string().max(10000))).min(1).max(5000),mapping:z.record(z.string(),z.enum(importFields)),resolutions:z.record(z.string(),z.number().int().positive()).optional(),modes:z.record(z.string(),z.enum(['mac','identifier'])).optional()}).strict();
+export type PreviewRow={index:number;category:'existing'|'changed'|'new'|'review'|'unmatched';requires_mac_approval?:boolean;previous_mac?:string;previous_mac_mode?:string;reason?:string;data:Record<string,unknown>;customer_id?:number;customer_number?:string;previous_end?:string|null;version?:number;fingerprint:string};
+export type Preview={id:string;profile:ImportProfile;mode:'all'|'existing_only';rows:PreviewRow[];counts:Record<PreviewRow['category'],number>};
+export const previewInput=z.object({profile:z.enum(['unified','mgmt','customers']).default('unified'),mode:z.enum(['all','existing_only']).default('all'),rows:z.array(z.record(z.string().max(160),z.string().max(10000))).min(1).max(5000),mapping:z.record(z.string(),z.enum(importFields)),resolutions:z.record(z.string(),z.number().int().positive()).optional(),modes:z.record(z.string(),z.enum(['mac','identifier'])).optional()}).strict();
 type PreviewInput=z.infer<typeof previewInput>;
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 function importDate(raw: string) {
@@ -102,15 +102,17 @@ function mapRow(raw:RawRow,mapping:PreviewInput['mapping'],country:string,forced
  customerPatchSchema.parse(data);return data;
 }
 const identifier=(c:{mac_address:string;mac_mode?:string})=>(c.mac_mode||'mac')+':'+c.mac_address.trim();
-export async function classify(input:PreviewInput):Promise<PreviewRow[]>{
+export async function classify(raw:Omit<PreviewInput,'mode'> & {mode?:PreviewInput['mode']}):Promise<PreviewRow[]>{
+ const input=previewInput.parse(raw);
  const country=(await get<{default_country:string}>('SELECT default_country FROM integration_settings WHERE id=1'))?.default_country||'AT';
- const mapped=input.rows.map((raw,index)=>{try{return{data:mapRow(raw,input.mapping,country,input.modes?.[String(index)])};}catch(e){return{data:{} as Record<string,unknown>,error:e instanceof Error?e.message:'Ungültige Zeile'};}});
- const customers=await everyCustomer(),duplicates=new Map<string,number>();
- for(const row of mapped)if(!row.error){const key=normalizeName(String(row.data.name))+'|'+identifier(row.data as {mac_address:string;mac_mode:string});duplicates.set(key,(duplicates.get(key)||0)+1);}
+ const mapped=input.rows.map((raw,index)=>{try{return{data:mapRow(raw,input.mode==='existing_only'?Object.fromEntries(Object.entries(input.mapping).filter(([,field])=>['name','mac_address','mac_mode','service_end'].includes(field))):input.mapping,country,input.modes?.[String(index)])};}catch(e){return{data:{} as Record<string,unknown>,error:e instanceof Error?e.message:'Ungültige Zeile'};}});
+ const customers=await everyCustomer(),duplicates=new Map<string,number>(),names=new Map<string,number>(),identifiers=new Map<string,number>();
+ for(const row of mapped)if(!row.error){const key=normalizeName(String(row.data.name))+'|'+identifier(row.data as {mac_address:string;mac_mode:string});duplicates.set(key,(duplicates.get(key)||0)+1);const name=normalizeName(String(row.data.name)),id=identifier(row.data as {mac_address:string;mac_mode:string});names.set(name,(names.get(name)||0)+1);identifiers.set(id,(identifiers.get(id)||0)+1);}
  return Promise.all(mapped.map(async(row,index)=>{
    const result:PreviewRow={index,category:'review',data:row.data,fingerprint:''};if(row.error)return{...result,reason:row.error};
    const name=normalizeName(String(row.data.name)),key=identifier(row.data as {mac_address:string;mac_mode:string});
    if((duplicates.get(name+'|'+key)||0)>1)return{...result,reason:'Doppelte Zeile: Name und MAC-Adresse bzw. Kennung kommen mehrfach vor.'};
+   if(input.mode==='existing_only')return classifyExisting(row.data,index,customers,input,names,identifiers);
    const candidates=customers.filter(c=>normalizeName(c.name)===name||identifier(c)===key),exact=candidates.filter(c=>normalizeName(c.name)===name&&identifier(c)===key);
    result.fingerprint=hash(candidates.map(c=>[c.id,c.version,c.name,c.mac_address,c.mac_mode]));
    const resolved=input.resolutions?.[String(index)];let target:Customer|undefined;
@@ -123,24 +125,42 @@ export async function classify(input:PreviewInput):Promise<PreviewRow[]>{
    return{...result,category:changed?'changed':'existing',customer_id:target.id,customer_number:target.customer_number,version:target.version,previous_end:target.service_end,...(changed&&target.service_end===row.data.service_end?{reason:'Stammdaten geändert; Serviceende bleibt gleich.'}:{})};
  }));
 }
+function classifyExisting(data:Record<string,unknown>,index:number,customers:Customer[],input:PreviewInput,names:Map<string,number>,identifiers:Map<string,number>):PreviewRow{
+ const name=normalizeName(String(data.name)),key=identifier(data as {mac_address:string;mac_mode:string});
+ const result:PreviewRow={index,category:'review',data:{name:data.name,mac_address:data.mac_address,mac_mode:data.mac_mode,service_end:data.service_end},fingerprint:''};
+ if((names.get(name)||0)>1||(identifiers.get(key)||0)>1)return{...result,reason:'Widersprüchliche oder doppelte Zeilen: Benutzername oder Kennung kommt mehrfach in der Datei vor.'};
+ const byName=customers.filter(c=>normalizeName(c.name)===name),byId=customers.filter(c=>identifier(c)===key);
+ result.fingerprint=hash(customers.filter(c=>byName.includes(c)||byId.includes(c)).map(c=>[c.id,c.version,c.name,c.mac_address,c.mac_mode]));
+ const resolved=input.resolutions?.[String(index)];
+ if(!byName.length)return byId.length?{...result,reason:'Die neue MAC-Adresse bzw. Kennung ist einem anderen Benutzernamen zugeordnet.'}:{...result,category:'unmatched',reason:'Kein Treffer. In diesem Modus werden keine Kunden angelegt.'};
+ if(byName.length>1&&!resolved)return{...result,reason:'Benutzername ist mehrfach vorhanden. Eine eindeutige manuelle Zuordnung ist erforderlich.'};
+ const target=resolved?byName.find(c=>c.id===resolved):byName[0];
+ if(!target)return{...result,reason:'Manuelle Zuordnung muss zu diesem Benutzernamen gehören.'};
+ if(byId.some(c=>c.id!==target.id))return{...result,reason:'Die neue MAC-Adresse bzw. Kennung ist bereits einem anderen Konto zugeordnet.'};
+ result.data.name=target.name;
+ const macChanged=identifier(target)!==key,endChanged=target.service_end!==data.service_end;
+ return{...result,category:macChanged||endChanged?'changed':'existing',customer_id:target.id,customer_number:target.customer_number,version:target.version,previous_end:target.service_end,previous_mac:target.mac_address,previous_mac_mode:target.mac_mode,requires_mac_approval:macChanged,...(macChanged?{reason:'MAC-Adresse für diesen Kunden aktualisieren? Eigene Freigabe pro Zeile erforderlich.'}:{})};
+}
 export async function makePreview(raw:unknown,actor:string):Promise<Preview>{
  const input=previewInput.parse(raw),fields=Object.values(input.mapping);if(new Set(fields).size!==fields.length)fail('Ein Zielfeld darf nur einmal zugeordnet werden.');
  for(const required of ['name','mac_address','service_end'])if(!fields.includes(required as ImportField))fail('Pflichtspalten: Name, MAC-Adresse und Serviceende.');
  const rows=await classify(input),id=randomUUID();
  await run('DELETE FROM import_previews WHERE expires_at<?',Date.now()-86400000);
  await run('INSERT INTO import_previews(id,actor,payload,expires_at) VALUES(?,?,?,?)',id,actor,JSON.stringify({input,rows}),Date.now()+1800000);
- return{id,profile:'unified',rows,counts:{existing:rows.filter(r=>r.category==='existing').length,changed:rows.filter(r=>r.category==='changed').length,new:rows.filter(r=>r.category==='new').length,review:rows.filter(r=>r.category==='review').length}};
+ return{id,profile:'unified',mode:input.mode,rows,counts:{existing:rows.filter(r=>r.category==='existing').length,changed:rows.filter(r=>r.category==='changed').length,new:rows.filter(r=>r.category==='new').length,review:rows.filter(r=>r.category==='review').length,unmatched:rows.filter(r=>r.category==='unmatched').length}};
 }
-export const commitInput=z.object({preview_id:z.string().uuid(),selection:z.array(z.object({index:z.number().int().min(0),payment:z.enum(['keep','unpaid']).default('keep')}).strict()).max(5000)}).strict();
+export const commitInput=z.object({preview_id:z.string().uuid(),selection:z.array(z.object({index:z.number().int().min(0),payment:z.enum(['keep','unpaid']).default('keep'),approve_mac:z.literal(true).optional()}).strict()).max(5000)}).strict();
 export async function commitImport(raw:unknown,actor:string){
  const input=commitInput.parse(raw);if(new Set(input.selection.map(s=>s.index)).size!==input.selection.length)fail('Doppelte Auswahl.');
  return transaction(async()=>{
    const saved=await get<{payload:string;expires_at:number;consumed:number;result:string}>('SELECT * FROM import_previews WHERE id=? AND actor=?',input.preview_id,actor);if(!saved)fail('Vorschau nicht gefunden.',404);if(saved.consumed)return JSON.parse(saved.result);if(saved.expires_at<Date.now())fail('Vorschau abgelaufen. Bitte neu einlesen.',409);
    const payload=JSON.parse(saved.payload) as {input:PreviewInput;rows:PreviewRow[]},current=await classify(previewInput.parse(payload.input));let created=0,updated=0;
-   for(const selected of input.selection){const old=payload.rows[selected.index],fresh=current[selected.index];if(!old||!fresh||old.category==='review')fail('Ungeklärte Zeile darf nicht freigegeben werden.');if(JSON.stringify(old)!==JSON.stringify(fresh))fail('Daten seit der Vorschau verändert. Bitte eine neue Vorschau erstellen.',409);
+   for(const selected of input.selection){const old=payload.rows[selected.index],fresh=current[selected.index];if(!old||!fresh||!['new','changed','existing'].includes(old.category))fail('Ungeklärte Zeile darf nicht freigegeben werden.');if(JSON.stringify(old)!==JSON.stringify(fresh))fail('Daten seit der Vorschau verändert. Bitte eine neue Vorschau erstellen.',409);
+     if(fresh.requires_mac_approval&&!selected.approve_mac)fail('MAC-Adresse für diesen Kunden aktualisieren? Diese Änderung muss pro Zeile ausdrücklich freigegeben werden.');
+     if(payload.input.mode==='existing_only'&&fresh.category==='new')fail('Dieser Import darf keine neuen Kunden anlegen.');
      let applied:Customer|undefined;
      if(fresh.category==='new'){applied=await createCustomer(fresh.data,actor,true);created++;}
-     else if(fresh.category==='changed'){applied=await updateCustomer(fresh.customer_id!,fresh.data,fresh.version!,actor,true,selected.payment);updated++;}
+     else if(fresh.category==='changed'){applied=await updateCustomer(fresh.customer_id!,fresh.data,fresh.version!,actor,true,payload.input.mode==='existing_only'&&fresh.previous_end===fresh.data.service_end?'keep':selected.payment);updated++;}
      if(applied)await run('INSERT INTO import_receipts(profile,row_hash,customer_id,applied_version) VALUES(?,?,?,?) ON CONFLICT(profile,row_hash,customer_id) DO UPDATE SET applied_version=excluded.applied_version','unified',hash(fresh.data),applied.id,applied.version);
    }
    const result={created,updated,skipped:payload.rows.length-created-updated};await audit(actor,'import.approve',input.preview_id,{selection:input.selection,result});await run('UPDATE import_previews SET consumed=1,result=? WHERE id=?',JSON.stringify(result),input.preview_id);return result;

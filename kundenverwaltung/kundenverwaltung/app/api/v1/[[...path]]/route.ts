@@ -1,7 +1,8 @@
+import {backupAvailable,startBackup,backupStatus,downloadBackup} from '@/lib/backups';
 import {previewBulk,commitBulk} from '@/lib/bulk';
 import {countries} from '@/lib/phone';
 import { z } from 'zod';
-import { authorize, configured, loginAccounts, logout, manageIdentity } from '@/lib/auth';
+import { authorize, configured, rateLimit, loginAccounts, logout, manageIdentity } from '@/lib/auth';
 import { all, audit, get, run, transaction } from '@/lib/db';
 import { createCustomer, customer, filteredCustomers, renewCustomer, reports, setPayment, updateCustomer, checkVersion } from '@/lib/customers';
 import { AppError, customerSchema, customerPatchSchema, dateSchema, fail, payments, renewalPreview, today } from '@/lib/domain';
@@ -43,7 +44,7 @@ async function dispatch(request: Request, context: Context) {
                 throw e;
             }
         }
-        const admin = ['settings', 'deliveries', 'audit', 'users', 'messages'].includes(path[0]) || method === 'DELETE';
+        const admin = ['settings', 'deliveries', 'audit', 'users', 'messages', 'backups'].includes(path[0]) || method === 'DELETE';
         let actor;
         try {
             actor = await authorize(request, admin);
@@ -52,6 +53,14 @@ async function dispatch(request: Request, context: Context) {
             if (e instanceof AppError && [401, 403].includes(e.status))
                 await audit('anonymous', 'security.denied', endpoint.slice(0, 200), { status: e.status });
             throw e;
+        }
+        if(path[0]==='backups'){
+          if(request.headers.has('authorization'))fail('Backup-Zugriff ist ausschließlich über eine angemeldete Administratorsitzung erlaubt.',403);
+          if(endpoint==='backups'&&method==='GET')return json({available:backupAvailable(),reason:backupAvailable()?null:'Diese Umgebung verwendet SQLite. Herunterladbare PostgreSQL-Backups sind im Serverbetrieb verfügbar.'});
+          if(endpoint==='backups'&&method==='POST'){z.object({}).strict().parse(await input(request));await rateLimit('backup:'+actor.subject,3);return json(await startBackup(actor.subject),202);}
+          const id=z.string().uuid().parse(path[1]);
+          if(path.length===2&&method==='GET')return json(await backupStatus(id,actor.subject));
+          if(path.length===3&&path[2]==='download'&&method==='GET')return downloadBackup(id,actor.subject);
         }
         if(endpoint==='bulk/preview'&&method==='POST')return json(await previewBulk(await input(request),actor.subject,actor.role==='admin'));
         if(endpoint==='bulk/commit'&&method==='POST')return json(await commitBulk(await input(request),actor.subject,actor.role==='admin'));

@@ -1,0 +1,18 @@
+'use client';
+import {useEffect,useState} from 'react';
+import {CheckCircle2,DatabaseBackup,Download,Loader2} from 'lucide-react';
+type Api=(path:string,method?:string,body?:unknown)=>Promise<any>;
+type Job={id:string;status:'running'|'ready'|'failed'|'downloading';filename:string;expires_at:string;bytes?:number;error?:string};
+export default function DatabaseBackupPanel({api}:{api:Api}){
+ const[available,setAvailable]=useState<boolean|null>(null),[reason,setReason]=useState(''),[job,setJob]=useState<Job|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[downloaded,setDownloaded]=useState(false);
+ useEffect(()=>{let live=true;api('backups').then(d=>{if(live){setAvailable(d.available);setReason(d.reason||'');}}).catch(e=>{if(live)setError(e.message);});return()=>{live=false;};},[api]);
+ useEffect(()=>{if(job?.status!=='running')return;let live=true;const timer=setInterval(()=>api('backups/'+job.id).then(d=>{if(live){setJob(d);if(d.status==='failed')setError(d.error);}}).catch(e=>{if(live){setError(e.message);setJob(null);}}),1000);return()=>{live=false;clearInterval(timer);};},[api,job?.id,job?.status]);
+ useEffect(()=>{if(job?.status==='ready'&&!downloaded)void download();},[job?.id,job?.status]);
+ async function create(){setBusy(true);setError('');setDownloaded(false);try{setJob(await api('backups','POST',{}));}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
+ async function download(){if(!job)return;setBusy(true);setError('');try{const r=await fetch('/api/v1/backups/'+job.id+'/download');if(!r.ok)throw new Error((await r.json()).error?.message||'Download fehlgeschlagen.');const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=job.filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);setDownloaded(true);}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
+ return <section className="panel"><div className="panel-heading"><div><h2>Datenbank-Backup</h2><p>PostgreSQL-Kundendatenbank als wiederherstellbare Sicherung herunterladen.</p></div><DatabaseBackup size={24}/></div><div className="panel-text"><p>Das Backup enthält Kunden, Servicezeiträume und Änderungsprotokolle. Login-Passwörter und MFA liegen separat in Keycloak und benötigen zusätzlich die dokumentierte Serversicherung.</p>{available===false&&<div className="alert">{reason}</div>}<button className="button primary" disabled={!available||busy||job?.status==='running'} onClick={create}>{busy||job?.status==='running'?<Loader2 className="spin" size={17}/>:<DatabaseBackup size={17}/>} Backup erstellen und herunterladen</button>
+ {job?.status==='running'&&<p role="status"><Loader2 className="spin" size={16}/> Backup wird serverseitig erstellt. Bitte dieses Fenster geöffnet lassen.</p>}
+ {job?.status==='ready'&&!downloaded&&<div className="backup-result" role="status"><CheckCircle2 className="green" size={20}/><div><b>Backup erstellt</b><p>{job.filename} · {Math.ceil((job.bytes||0)/1024)} KiB</p><p>Einmaliger Download bis {new Date(job.expires_at).toLocaleTimeString('de-DE')}.</p><button className="button secondary" disabled={busy} onClick={download}><Download size={17}/> Backup herunterladen</button></div></div>}
+ {downloaded&&<p className="green" role="status">Backup heruntergeladen. Die temporäre Serverdatei wurde entfernt.</p>}{error&&<div className="alert danger" role="alert">{error}</div>}
+ <p className="small muted">Zugriff nur für deine angemeldete Administratorsitzung. Temporäre Sicherungen werden nach dem Download oder spätestens nach 15 Minuten bereinigt. Sicherungen geschützt aufbewahren; Wiederherstellung siehe Serveranleitung.</p></div></section>;
+}
