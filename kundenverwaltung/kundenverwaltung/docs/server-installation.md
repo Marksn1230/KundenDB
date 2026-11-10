@@ -272,8 +272,14 @@ curl --silent --show-error --output /dev/null --write-out '%{http_code}\n' \
   "https://$DOMAIN/api/v1/customers"
 curl --silent --show-error --dump-header - --output /dev/null \
   "https://$DOMAIN/api/auth/login?returnTo=%2Fkunden"
+curl --silent --show-error --output /dev/null --write-out '%{http_code}\n' \
+  "https://$DOMAIN/auth/admin/"
+curl --silent --show-error --output /dev/null --write-out '%{http_code}\n' \
+  "https://$DOMAIN/auth/realms/master/.well-known/openid-configuration"
 sudo ./scripts/configure-domain.sh --status
 ~~~
+
+Beide privaten Keycloak-Prüfpfade müssen **404** liefern; die Discovery des Anwendungs-Realms bleibt erreichbar.
 
 Erwartet: db/identity-db gesund, später web/worker gesund; Keycloak/Caddy laufend. Migrationsversionen vorhanden, Heartbeat jünger als 180 Sekunden. Health **200 / {"status":"ok"}**, HTTP-Weiterleitung mit HTTPS-Location, Zertifikat für den Host mit künftigem Ablaufdatum. Discovery-Issuer **https://DOMAIN/auth/realms/kundenraum**. Anonyme Kunden-API **401**, Login **302** unter derselben Domain nach /auth/. Keine Cookies, OAuth-State-Werte oder Tokens aus diesen Ausgaben veröffentlichen.
 
@@ -523,29 +529,53 @@ Erwartet: Discovery 200 mit öffentlichem HTTPS-Issuer, Login 302 zur selben Dom
 
 ## 10. Tatsächlich geprüfte Schritte
 
-Stand: **09.11.2026**, Quellbasis **a3e124f32af7422026022da2f366aab6d8e96e18**. Diese Änderung ergänzt Dokumentation, keine Anwendungsfunktionen. Geprüft wurde im Windows-Workspace mit frischen temporären Konfigurationsdateien und isolierten Testprozessen; dies ist **keine vollständige Ubuntu-Serverabnahme**.
+Stand: **11.11.2026**, Quellbasis **5fe4d6759138ff19043483e8d42c56470b68d934** plus Korrektur in `deploy/routes.caddy` und Regressionstest in `tests/domain-runtime.test.ts`.
 
-| Schritt dieser Anleitung | Tatsächliche Prüfung und Ergebnis |
+Die Installation wurde mit **echten Linux-Containern unter Docker Desktop** aus einer isolierten Kopie des Projekts und mit **frischen PostgreSQL-Volumes** durchgeführt. Projektname: `kundenraum-install-test`, eigenes Anwendungsimage `kundenraum:install-test`, separate Zufallszugänge. Bestehende Entwicklungsdaten und Konten wurden nicht verwendet. Dies prüft die Containerinstallation; Ubuntu-Hostinstallation, öffentliche DNS-Auflösung und ACME-Ausstellung sind davon getrennt.
+
+**Umgebung:** Docker Engine 29.9.2, Compose 5.6.1, Linux/amd64; Node 26.13.0, PostgreSQL 17.11, Keycloak 26.8.2, Caddy 2.11.9. Nur für den lokalen Test wurde Caddy auf eine interne Test-CA und die Hostports auf Loopback umgestellt. Domain: `kundenraum.localhost`. Die Produktionskonfiguration verwendet weiterhin ausschließlich Let's Encrypt. Der HTTPS-Testclient prüfte die Zertifikatskette gegen die Test-CA und den Hostnamen; Chrome verwendete für den lokalen Test die Option `ignoreHTTPSErrors`.
+
+| Schritt | Tatsächliche Prüfung und Ergebnis |
 |---|---|
-| 1: Ubuntu, APT, Firewall, Docker Engine | Nicht auf einem frischen Linux-Server ausgeführt. Lokal sind Docker-CLI und Compose vorhanden, aber keine Linux-Engine erreichbar und keine WSL-Distribution installiert. |
-| 2: GitHub-Bezug | Tatsächlicher HTTPS-Clone von https://github.com/Marksn1230/KundenDB.git, Branch master, in ein neues temporäres Verzeichnis erfolgreich; Commit wie oben. Das Registrieren eines neuen privaten Deploy-Keys wurde nicht ausgeführt. |
-| 3: .env und Geheimnisse | Frische Kopie der Servervorlage mit setup-server.mjs geprüft: acht unterschiedliche 32-Byte-Zufallswerte, passende interne DATABASE_URL, keine Ausgabe der Geheimnisse. Zweiter Setup-Aufruf verweigert das Überschreiben. Ausführung hier mit lokalem Node; der Docker-Wrapper bleibt ungeprüft. |
-| 4: DNS und HTTPS-Konfiguration | Fehlende/falsche A-/AAAA-Einträge, Abbruch ohne Änderungen, Bestätigung und Konfigurationsrückkehr mit isolierten Testdaten geprüft. Echtes Caddy adaptiert die gelieferten Konfigurationen für Production, Staging und HTTP. Keine öffentlichen DNS-Einträge verändert. |
-| 5: Compose und Startreihenfolge | docker compose config --quiet mit der neuen Test-.env erfolgreich. Tatsächliche Dienstnamen, Hilfsbefehle, gemeinsame DATABASE_URL, Volume-Konfiguration und ausschließlich Caddy-Hostports geprüft. Der danach versuchte isolierte Start von db/identity-db scheitert vor Containerstart an der fehlenden DockerDesktopLinuxEngine-Pipe. Build, Migration und erster Keycloak-Administrator im frischen Compose-Projekt konnten deshalb nicht folgen. |
-| 6: Domainwechsel und Login-Callback | Vorhandene Tests prüfen den Abgleich von Callback, Origin, IdP-Frontend und HTTPS-Vorgabe gegen einen isolierten Verwaltungs-Testserver. Kein öffentlicher Domainwechsel und kein persönlicher Keycloak-/MFA-Login auf einem neuen Server durchgeführt. |
-| 7–8: Backup und Restore | Vorhandener Integrationstest mit neuem echtem PostgreSQL-17-Cluster und isoliertem Caddy erfolgreich: Admin-Webdownload, Zugriffsschutz, Einmaligkeit, Audit und Restore in eine zweite Datenbank mit Datenvergleich. Das testet native Prozesse und einen signierten OIDC-Testprovider mit lokaler Test-CA; nicht die Docker-Restore-Befehle oder ein öffentliches Let’s-Encrypt-Zertifikat. |
-| Kopierbare Befehle und Verweise | Bash-Syntax sämtlicher 25 Befehlsblöcke sowie beide README-Verweise geprüft. Eine Syntaxprüfung führt die enthaltenen Installations-/Restorebefehle nicht aus. |
+| Serverkonfiguration | `setup-server.mjs` erzeugt auch im Linux-Container acht unterschiedliche 32-Byte-Geheimnisse und die passende PostgreSQL-URL; ein zweiter Aufruf verweigert das Überschreiben. Keine Geheimnisse ausgegeben. |
+| Images und Build | PostgreSQL, Keycloak und Caddy erfolgreich geladen. Anwendung aus dem Dockerfile mit `npm ci`, Next.js-Produktionsbuild und TypeScript-Prüfung erfolgreich gebaut; nach der Proxy-Korrektur erneut erfolgreich gebaut. |
+| Datenbanken | Beide PostgreSQL-Dienste aus leeren Volumes gestartet und gesund. Anwendungsrollen sind weder Superuser noch zur Rollen-/Datenbankanlage berechtigt. Keine Datenbankports am Host veröffentlicht. |
+| Migration und Bootstrap | PostgreSQL-Schema Version 1 angelegt. Keycloak importiert den Realm und legt den persönlichen Administrator an. Erneute Migration und erneuter Bootstrap erfolgreich, ohne das bestehende persönliche Konto zurückzusetzen. |
+| Domain-Abgleich und Dienste | `identity-config` synchronisiert HTTPS-Callback, Origin und IdP-Frontend. Caddy-Konfiguration validiert. Web und Worker werden gesund; Worker-Heartbeat beim Abschluss 31 Sekunden alt. |
+| HTTPS und Zugriffsschutz | HTTP liefert 308 auf HTTPS; Health 200, anonyme Kunden-API 401, Discovery mit korrektem öffentlichen Issuer. Private Keycloak-Verwaltung und Master-Realm nach Korrektur jeweils 404. |
+| Persönlicher Browserlogin | Reales Keycloak mit Chrome: temporäres Passwort, Pflicht-Passwortwechsel, TOTP-Einrichtung, Administratorrechte, sichere HttpOnly-Sitzung und Abmeldung erfolgreich. Erneute Anmeldung mit Passwort und TOTP ebenfalls erfolgreich. |
+| Kundendaten und Web-Backup | Fiktiven Kunden über die authentifizierte API angelegt und gelesen. Zahlung und Kundennummer geprüft. Web-Backup über MFA-Administratorsitzung heruntergeladen, PostgreSQL-Custom-Format und einmaligen Download geprüft. |
+| Restore des Web-Backups | Den heruntergeladenen Dump mit `pg_restore` in eine separate PostgreSQL-Datenbank eingespielt; Kundennummer und Zahlung stimmen überein. |
+| Vollständiger Restore | Schreibdienste gestoppt, Kunden- und Identity-Datenbank mit `pg_dump -Fc` gesichert, Dump-Listen geprüft, beide **Testdatenbanken** neu angelegt und mit `pg_restore --role=… --no-owner --no-acl --exit-on-error` wiederhergestellt. Kunden, Serviceperioden, Auditdaten, Keycloak-Benutzer und Anmeldeinformationen einschließlich MFA vor/nach Restore identisch. |
+| Wiederanlauf mit neuem Image | Migration erneut ausgeführt, Keycloak neu erstellt, Domain-Abgleich ausgeführt, Web/Worker/Caddy aus dem neuen Image neu erstellt. Alle Dienste laufen; erneuter Browserlogin mit erhaltenem Passwort/TOTP, Kundendaten und Zahlung erfolgreich. |
 
-**Automatisierte Ergebnisse:** Die vorhandenen Tests in tests/domain-configure.test.ts, tests/domain-runtime.test.ts und tests/deployment.test.ts bestehen mit **10 bestanden, 0 Fehlern, 0 übersprungen**. Der zusätzliche Test tests/backup-postgres.test.ts besteht mit **1 bestanden, 0 Fehlern, 0 übersprungen**.
+### Gefundener und behobener Fehler
 
-Beim ersten Backup-Testaufruf ohne NEXT_DIST_DIR wurde der Testserver nicht bereit. Die Wiederholung mit dem vorhandenen aktuellen Produktions-Prüfbuild **NEXT_DIST_DIR=.next-verify** bestand. Es wurden dafür keine Anwendungsdateien verändert. Die nativen Testprozesse wurden durch den Test beendet; bestehende Entwicklungsdaten und Login-Konten wurden nicht verwendet.
+Die bisherige `respond @privateIdentity 404`-Anweisung stand außerhalb der Proxy-Blöcke. Caddy sortierte sie hinter die `handle`-Weiterleitungen; `/auth/admin/` lieferte im echten Containertest **302 statt 404**. `deploy/routes.caddy` fasst Zugriffssperre und Weiterleitungen jetzt in einem `route`-Block zusammen, der die Reihenfolge erhält. Siehe [Caddy: Reihenfolge der Direktiven](https://caddyserver.com/docs/caddyfile/directives).
 
-### Noch für eine vollständige Live-Abnahme erforderlich
+Der neue Regressionstest startet echtes Caddy, prüft fünf gesperrte Verwaltungs-/Master-Pfade sowie vier erlaubte Login-/Anwendungspfade. Auch im Docker-Browsertest wurden die Sperren nach der Korrektur erfolgreich geprüft. Der Fehler erklärt nicht automatisch eine bisher unbekannte Fehlermeldung eines anderen Dev-Servers.
 
-- Eine frische Ubuntu-24.04-VM beziehungsweise ein entsprechender Server mit laufender Linux-Docker-Engine: Abschnitte 1–5 tatsächlich in dieser Reihenfolge ausführen, anschließend Update und Restore auf einem separaten Testbestand prüfen.
-- Eine eigene öffentliche Testdomain mit DNS-Zugriff sowie von außen erreichbaren TCP-Ports 80/443: zuerst Staging-Ausstellung, dann bewusst Production, HTTP-Weiterleitung und Zertifikat prüfen.
-- Ersten persönlichen Administrator mit Passwortwechsel und TOTP im Browser anmelden, abmelden und erneut anmelden; die Callback-Prüfung allein ersetzt diesen Schritt nicht.
-- **Öffentliche Let’s-Encrypt-Ausstellung und tatsächliche automatische Erneuerung sind nicht getestet.** Die Erneuerung ist konfiguriert; eine beobachtete Erneuerung muss mit Zertifikatsablauf/Logs separat dokumentiert werden.
-- Für ein privates Repository muss ein Berechtigter den neuen Read-only-Deploy-Key bei GitHub eintragen. Der HTTPS-Testclone war mit dem vorhandenen Git-Zugriff erfolgreich; die Einrichtung neuer Serverzugangsdaten wurde nicht geprüft. GHCR-Zugangsdaten sind für den derzeitigen lokalen Buildweg nicht erforderlich.
+### Automatisierte Prüfungen
 
-Für die erneute Entwicklerprüfung werden Node.js und die installierten Projektabhängigkeiten benötigt; der Backup-Integrationstest außerdem den aktuellen Prüfbuild sowie die in der Projektanleitung beschriebenen PostgreSQL-/Caddy-Testbinaries. Die Serverinstallation selbst benötigt diese Host-Werkzeuge nicht.
+- Im Linux-Anwendungsimage: `deployment.test.ts`, `postgres.test.ts`, `migration.test.ts`, `domain-configure.test.ts`: **10 bestanden, 0 Fehler, 0 übersprungen**.
+- Nach Korrektur im Workspace mit echtem Caddy: `domain-runtime.test.ts`, `deployment.test.ts`, `domain-configure.test.ts`: **11 bestanden, 0 Fehler, 0 übersprungen**. Einige Tests überschneiden sich mit dem Linux-Lauf.
+- Zusätzlich die oben dokumentierten echten Docker-, Chrome-, PostgreSQL-Dump-/Restore- und Wiederanlaufprüfungen.
+
+Die dauerhaften Regressionstests können im inneren Projekt erneut ausgeführt werden:
+
+~~~bash
+node --import tsx --test tests/domain-runtime.test.ts tests/deployment.test.ts tests/domain-configure.test.ts
+~~~
+
+Dafür müssen die Projektabhängigkeiten installiert sein. `TEST_CADDY_BINARY` kann auf eine ausführbare Caddy-Datei zeigen; sonst wird `.runtime/caddy/caddy` beziehungsweise unter Windows `.runtime/caddy/caddy.exe` verwendet. Ohne Caddy-Binary werden die echten Caddy-Tests ausdrücklich übersprungen.
+
+Die lokalen Prüfskripte und Testartefakte liegen ignoriert unter `.test-data/docker-browser.mjs`, `.test-data/docker-lifecycle.mjs` und `.test-data/docker-install/`. Dort liegen auch ausschließlich lokale Testzugänge und Dumps; diesen Ordner nicht veröffentlichen. Die Testcontainer wurden nach Abschluss beendet; Testvolumes bleiben für eine mögliche Nachprüfung erhalten.
+
+### Noch auf dem Zielserver zu prüfen
+
+- Ubuntu-24.04-Hostinstallation einschließlich APT, Docker-Einrichtung, Firewall und Provider-/NAT-Regeln aus Abschnitt 1.
+- Öffentliche Testdomain mit richtigen A-/AAAA-Einträgen und von außen erreichbaren Ports 80/443; den Domain-Assistenten auf diesem Host vollständig ausführen. Lokal wurden seine Einzelschritte und automatisierten Fehlerpfade geprüft, kein öffentlicher DNS-Wechsel.
+- Let's-Encrypt-Staging-/Production-Ausstellung und tatsächlich beobachtete automatische Erneuerung. Ein lokales Testzertifikat belegt diese externen Schritte nicht.
+- Der konkrete Dev-Serverfehler: Ohne dessen Fehlermeldung, Installationsschritt und Quellstand lässt sich nicht feststellen, ob er mit der hier gefundenen Proxy-Konfiguration zusammenhängt.
+
+**Hinweis zu Containerlogs:** `.env not found. Continuing without it.` bei Migration/Worker ist in diesem Compose-Aufbau erwartbar. Die Datei wird nicht ins Image kopiert; Compose übergibt die Werte als Umgebungsvariablen. Maßgeblich sind Exitcode, nachfolgende Fehlermeldungen und Healthchecks.

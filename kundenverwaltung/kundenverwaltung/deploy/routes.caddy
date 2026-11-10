@@ -1,11 +1,14 @@
 encode zstd gzip
-@privateIdentity path /auth/admin* /auth/realms/master*
-respond @privateIdentity 404
-handle /auth/* {
- reverse_proxy keycloak:8080
-}
-handle {
- reverse_proxy web:3000
+# Preserve the access check before proxy handlers; Caddy otherwise sorts handle before respond.
+route {
+ @privateIdentity path /auth/admin* /auth/realms/master*
+ respond @privateIdentity 404
+ handle /auth/* {
+  reverse_proxy keycloak:8080
+ }
+ handle {
+  reverse_proxy web:3000
+ }
 }
 header X-Content-Type-Options "nosniff"
 header Referrer-Policy "same-origin"

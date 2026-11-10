@@ -29,3 +29,32 @@ test('Einrichtungsablauf beendet sich bei DNS-/Abbruchfehler vor Containeränder
   const commands=readFileSync(log,'utf8');if(code!==0)assert.equal(commands.includes('force-recreate'),false);else{assert.ok(commands.includes('force-recreate keycloak'));assert.ok(commands.includes('force-recreate web caddy'));assert.equal(commands.includes('build'),false);assert.equal(commands.includes('migrate'),false);assert.equal(commands.includes('worker'),false);assert.equal(commands.includes(' up -d db'),false);}
  }
 });
+
+// Exercise the real Caddy router: syntax/adaptation checks alone do not detect
+// a private-path response being reordered behind a terminal reverse proxy.
+test('Caddy sperrt private Keycloak-Pfade vor dem Proxy und lässt Anmeldung sowie Anwendung durch',{skip:!existsSync(caddy)?'Caddy-Testbinary fehlt':false,timeout:30000},async t=>{
+ const {createServer}=await import('node:http');
+ const {mkdtempSync,writeFileSync,readFileSync,rmSync}=await import('node:fs');
+ const {tmpdir}=await import('node:os');const {spawn}=await import('node:child_process');
+ const folder=mkdtempSync(path.join(tmpdir(),'kundenraum-caddy-routing-'));
+ t.after(()=>rmSync(folder,{recursive:true,force:true}));
+ const upstream=createServer((req,res)=>{res.end('upstream:'+req.url);});
+ await new Promise<void>(resolve=>upstream.listen(0,'127.0.0.1',resolve));
+ t.after(()=>new Promise<void>(resolve=>upstream.close(()=>resolve())));
+ const upstreamPort=(upstream.address() as {port:number}).port;
+ const reservation=createServer();await new Promise<void>(resolve=>reservation.listen(0,'127.0.0.1',resolve));
+ const port=(reservation.address() as {port:number}).port;await new Promise<void>(resolve=>reservation.close(()=>resolve()));
+ const routes=readFileSync('deploy/routes.caddy','utf8').replaceAll('keycloak:8080','127.0.0.1:'+upstreamPort).replaceAll('web:3000','127.0.0.1:'+upstreamPort);
+ writeFileSync(path.join(folder,'routes.caddy'),routes);
+ writeFileSync(path.join(folder,'Caddyfile'),'{\n admin off\n auto_https off\n}\nhttp://127.0.0.1:'+port+' {\n import routes.caddy\n}\n');
+ const child=spawn(caddy,['run','--config',path.join(folder,'Caddyfile'),'--adapter','caddyfile'],{windowsHide:true,stdio:'ignore'});
+ t.after(async()=>{if(child.exitCode===null){child.kill();await new Promise<void>(resolve=>child.once('exit',()=>resolve()));}});
+ const origin='http://127.0.0.1:'+port;
+ for(let n=0;;n++){try{if((await fetch(origin,{signal:AbortSignal.timeout(500)})).ok)break;}catch{}if(n===100)throw new Error('Caddy-Testserver nicht bereit');await new Promise(r=>setTimeout(r,50));}
+ for(const resource of ['/auth/admin','/auth/admin/','/auth/admin/realms/kundenraum','/auth/realms/master','/auth/realms/master/protocol/openid-connect/token']){
+  const response=await fetch(origin+resource,{redirect:'manual'});assert.equal(response.status,404,resource);assert.doesNotMatch(await response.text(),/upstream:/);
+ }
+ for(const resource of ['/auth/realms/kundenraum/.well-known/openid-configuration','/auth/resources/login.css','/api/v1/health','/kunden']){
+  const response=await fetch(origin+resource);assert.equal(response.status,200,resource);assert.equal(await response.text(),'upstream:'+resource);assert.equal(response.headers.get('x-content-type-options'),'nosniff');
+ }
+});
