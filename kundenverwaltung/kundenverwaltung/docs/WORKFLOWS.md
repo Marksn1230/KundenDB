@@ -33,17 +33,23 @@ Die Datei `deploy/mfa-allowlist.caddy` ist bei Auslieferung leer. Nur einzelne �
 
 ```bash
 node scripts/configure-mfa-ips.mjs 8.8.8.8 2606:4700:4700::1111
-docker compose -f compose.server.yml exec -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-docker compose -f compose.server.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+sudo docker compose -f compose.server.yml exec -T caddy sh -eu -c '
+  . /etc/caddy/domain-env.sh
+  configuration=/etc/caddy/Caddyfile
+  if [ "${HTTPS_ENABLED:-true}" = false ]; then configuration=/etc/caddy/Caddyfile.http; fi
+  caddy validate --config "$configuration" --adapter caddyfile
+  caddy reload --config "$configuration" --adapter caddyfile
+'
 ```
+
+Die Shell lädt vor Prüfung und Reload dieselben abgeleiteten Domain-/ACME-Variablen wie beim normalen Containerstart. Ein direktes `exec caddy caddy reload` erbt diese nur im Startprozess gesetzten Werte nicht und kann bei `dir` wegen einer leeren `ACME_DIRECTORY` scheitern. Bei fehlgeschlagener Validierung wird kein Reload ausgeführt.
 
 Die Beispieladressen sind Syntaxbeispiele und dürfen nicht als fremde Adressen freigegeben werden. Keine zusätzliche Proxy-/CDN-Stufe vor Caddy konfigurieren: Der Abgleich verwendet den tatsächlichen Socket-Absender `remote_ip`. Caddy entfernt `Forwarded` und setzt X-Forwarded-For, -Host, -Proto sowie X-Kundenraum-OTP-Policy kontrolliert neu. Selbst gesetzte Browserheader können die Ausnahme nicht aktivieren. Keycloak akzeptiert Proxyinformationen ausschließlich von Caddy unter `172.30.93.2`; Caddy kontaktiert dafür Keycloak unter `172.30.93.3`. Keycloak und Datenbanken dürfen keine öffentlichen Hostports erhalten. Bei fehlender oder unbekannter Client-IP bleibt die Policy `force`.
 
-Sofortige Aufhebung für nachfolgende Logins:
+Sofortige Aufhebung für nachfolgende Logins: Liste leeren und anschließend denselben Prüf-/Reload-Befehl von oben ausführen:
 
 ```bash
 node scripts/configure-mfa-ips.mjs
-docker compose -f compose.server.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
 ```
 
 Bereits angemeldete Sitzungen werden durch einen IP-Listenwechsel nicht beendet. Für einen sofortigen Widerruf auch bestehender Sitzungen anschließend `run --rm identity-policy` ausführen und bei Bedarf die betroffenen Anwendungssitzungen über die Benutzerverwaltung widerrufen.
