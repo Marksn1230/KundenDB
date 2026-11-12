@@ -1,197 +1,173 @@
-# Bestehende Serverinstallation von GitHub aktualisieren
+# Bestehenden Server aktualisieren – auch nach PuTTY-/SSH-Abbruch fortsetzbar
 
-Diese Anleitung ist für deinen **bereits laufenden Kundenraum mit der bisherigen GitHub-Version**. Sie erhält Kunden, Zahlungszeiträume, Benutzer, Passwörter, Domain und Zertifikate. Keine Neuinstallation durchführen. Die bestehende `.env` nicht durch eine Vorlage ersetzen und `setup`, `setup-server.mjs` oder `bootstrap` für dieses Update nicht erneut ausführen.
+Diese Anleitung ersetzt die frühere Befehlsfolge vollständig. **Die alte Anleitung mit `set -euo pipefail` und der Shell-Funktion `dc` nicht weiterverwenden.** `dc` war nur eine temporäre Funktion, kein installiertes Programm. Nach einer neuen SSH-Anmeldung existiert diese Funktion nicht mehr. `set -e` direkt in der interaktiven SSH-Shell konnte bei einem fehlgeschlagenen Befehl die Shell und damit PuTTY schließen. Welcher Befehl bei deinem bisherigen Versuch fehlschlug, ist ohne Protokoll nicht mehr feststellbar.
 
-GitHub: [Marksn1230/KundenDB, Branch master](https://github.com/Marksn1230/KundenDB/tree/master). Der Anwendungsordner ist `kundenverwaltung/kundenverwaltung` innerhalb des Git-Clones. Nach der bisherigen Installationsanleitung lautet er `/opt/kundenraum/kundenverwaltung/kundenverwaltung`. Falls du einen anderen Installationspfad verwendest, den ersten `cd` entsprechend anpassen.
+Im vollständigen Linux-Upgrade wurde außerdem ein konkreter Fehler im ausgelieferten Image reproduziert: Nach einem Checkout mit `umask 077` waren neue Quelldateien für den Containerbenutzer `node` nicht lesbar. Dadurch konnte `migrate` mit `EACCES` abbrechen. Das korrigierte Dockerfile übernimmt die Dateien mit passendem Eigentümer und prüft die Lesbarkeit bereits beim Image-Build als Anwendungsbenutzer. Der Quellcodewechsel verwendet außerdem gezielt `umask 022`, damit öffentliche Keycloak-/Proxy-Dateien in Bind-Mounts lesbar bleiben. Geheimnisse und Sicherungen behalten private Rechte.
 
-Voraussetzung ist die bisherige PostgreSQL-Installation mit `compose.server.yml`, nicht die lokale SQLite-/Windows-Konfiguration. Die Befehle in **derselben SSH-Bash-Sitzung** ausführen. Bei einem Fehler anhalten. Der Image-Build läuft zunächst bei weiter erreichbarer alter Anwendung. Für die zusammengehörigen Datenbanksicherungen und die Migration gibt es anschließend eine kurze Wartungsunterbrechung.
+Das neue Skript läuft als eigener Prozess, protokolliert alle Schritte und speichert seinen Fortschritt. Es **installiert oder deinstalliert Docker nicht**, verwendet kein `docker compose down`, kein Volume-Löschen und kein Pruning. `Recreate` in Compose bedeutet das Ersetzen eines Dienstcontainers unter Beibehaltung seiner Datenvolumes. `run --rm` räumt nur den einmaligen Migrations-/Abgleichcontainer auf.
 
-## 1. Bisherigen Stand und Konfiguration sichern
+## Nach deiner Snapshot-Wiederherstellung
+
+Warte, bis der Snapshot zurückgespielt und der Server wieder erreichbar ist. Öffne dann eine **neue PuTTY-Sitzung**. Zuerst die bisherige Domain öffnen: Der alte Kundenraum mit seinen alten Kundendaten muss wieder laufen. Diese Anleitung greift nicht auf deinen Server zu; du startest den Lauf selbst nach der Wiederherstellung.
+
+Die folgenden Beispiele verwenden den bisherigen Git-Installationspfad `/opt/kundenraum/kundenverwaltung/kundenverwaltung`. Falls du woanders installiert hast, den `cd`-Pfad anpassen. Keine Neuinstallation, kein erneutes Setup/Bootstrap, keine neue `.env` und kein neuer Compose-Projektname. Domain, Passwörter und Zertifikate bleiben erhalten.
+
+## 1. Ordner und vorhandenes Docker prüfen
+
+Jeden Block einzeln ausführen. Bei einer Fehlermeldung nicht zum nächsten Block wechseln. Die Befehle setzen **kein** `set -e` in deiner SSH-Shell.
 
 ```bash
-set -euo pipefail
+set +e
 cd /opt/kundenraum/kundenverwaltung/kundenverwaltung
-test -f compose.server.yml
-test -f .env
-repo_dir="$(git rev-parse --show-toplevel)"
-app_dir="$PWD"
-umask 077
+pwd
+ls -l compose.server.yml .env
+docker --version
+sudo docker info
+```
 
+`set +e` hebt vorsorglich ein eventuell noch gesetztes interaktives `errexit` auf. Wenn `docker --version` funktioniert, ist Docker installiert. Ein Fehler bei `docker info` kann ein Rechte- oder Dienstproblem sein; daraus folgt keine Deinstallation. In diesem Fall zunächst nur prüfen:
+
+```bash
+sudo systemctl status docker --no-pager
+```
+
+Keine Docker-Neuinstallation und keine Volume-Bereinigung als Reparatur versuchen. Die neue Update-Vorprüfung stoppt vor Änderungen, wenn Docker oder die erforderlichen Rechte fehlen.
+
+## 2. Neues Update-Skript abrufen – noch keinen Dienst anhalten
+
+Der im Snapshot enthaltene Quellstand bleibt zunächst aktiv. Nur die neue Skriptdatei wird aus dem abgerufenen GitHub-Stand in den ignorierten Laufzeitordner kopiert. Der eigentliche Quellcodewechsel passiert erst nach der Sicherung im Skript.
+
+```bash
 git status --short
-test -z "$(git status --porcelain --untracked-files=normal)"
-if git remote get-url origin >/dev/null 2>&1; then
-  update_remote=origin
-else
-  update_remote=orgin
-fi
-git remote get-url "$update_remote"
-
-dc() { sudo docker compose -f compose.server.yml "$@"; }
-dc ps
-web_container="$(dc ps -q web)"
-test -n "$web_container"
-
-df -h .
-update_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-backup_dir="$app_dir/backups/update-$update_stamp"
-mkdir -p "$backup_dir"
-chmod 700 "$backup_dir"
-
-git rev-parse HEAD > "$backup_dir/commit-before.txt"
-cp -p .env "$backup_dir/server.env"
-chmod 600 "$backup_dir/server.env"
-cp compose.server.yml "$backup_dir/compose-before.yml"
-git archive --format=tar HEAD > "$backup_dir/source-before.tar"
-sudo docker inspect --format '{{.Config.Image}}' "$web_container" > "$backup_dir/original-image.txt"
-old_image_id="$(sudo docker inspect --format '{{.Image}}' "$web_container")"
-rollback_image="kundenraum:rollback-$update_stamp"
-sudo docker image tag "$old_image_id" "$rollback_image"
-printf '%s\n' "$rollback_image" > "$backup_dir/rollback-image.txt"
-sudo docker image save "$rollback_image" | gzip > "$backup_dir/application-image.tar.gz"
-test -s "$backup_dir/application-image.tar.gz"
-printf 'Update-Sicherung: %s\n' "$backup_dir"
+git remote -v
+mkdir -p .runtime
+chmod 700 .runtime
+git fetch origin && git show origin/master:kundenverwaltung/kundenverwaltung/scripts/update-server.sh > .runtime/update-runner.sh
 ```
 
-`git status --short` muss leer sein. Bei lokalen Quellcodeänderungen zuerst deren Ursache klären; diese Anleitung überschreibt sie nicht mit `git reset` oder `git clean`. Die bisherigen `.env`, `data`, `backups` und Laufzeitdateien sind ignoriert und bleiben erhalten. Falls Git für deinen Server einen SSH-Deploy-Key verwendet, bleibt dessen bisherige Einrichtung bestehen.
+Ein normaler GitHub-Clone verwendet `origin`. Falls dein vorhandener Remote tatsächlich `orgin` heißt, in der letzten Zeile **beide** Vorkommen von `origin` durch `orgin` ersetzen. Keine Remote-URL oder SSH-Schlüssel ändern. `git status --short` muss bei den Quellcodedateien sauber sein; `.env`, Daten, Backups und `.runtime` sind ignoriert.
 
-Die Funktion `dc` verwendet das vorhandene Compose-Projekt. Falls du ursprünglich ein eigenes `-p PROJEKTNAME` verwendet hast, dieses **auch in der Funktion `dc`** ergänzen, beispielsweise `sudo docker compose -p meinprojekt -f compose.server.yml "$@"`. Nicht mit einem neuen Projektnamen starten: Dadurch würden andere Datenvolumes angelegt.
-
-Das alte Image wird vor dem Build zusätzlich unter einem Rollback-Tag gesichert. Genügend Speicher für altes/neues Image und beide Datenbankdumps vorsehen. Das Sicherungsverzeichnis enthält vertrauliche Daten; nach erfolgreichem Update zusätzlich geschützt außerhalb des Servers sichern.
-
-## 2. Neue Version pullen und bauen
+Anschließend Syntax und Vorbedingungen prüfen:
 
 ```bash
-git -C "$repo_dir" switch master
-git -C "$repo_dir" pull --ff-only "$update_remote" master
-git -C "$repo_dir" rev-parse HEAD
-
-test -f migrations/postgres/002_customer_workflows.sql
-test -f scripts/sync-login-policy.mjs
-cmp .env "$backup_dir/server.env"
-dc config --quiet
-dc build web
+bash -n .runtime/update-runner.sh
+sudo bash .runtime/update-runner.sh check
 ```
 
-`git pull --ff-only` stoppt bei abweichenden lokalen Commits, statt sie zusammenzuführen oder zu überschreiben. Der Build ersetzt noch keinen laufenden Container. `cmp` stellt sicher, dass die Servergeheimnisse unverändert sind. `APP_VERSION` darf bei seinem vorhandenen Wert bleiben: Das lokal gebaute Image erhält diesen Tag; der alte Stand ist zusätzlich über den Rollback-Tag gesichert. Für dieses Update sind weder ein GHCR-Login noch ein Paketmanager auf dem Server erforderlich.
+Nur wenn **„Vorprüfung erfolgreich“** erscheint, mit Schritt 3 fortfahren. Die Prüfung verändert keine Datenbank und stoppt keinen Dienst. Sie prüft unter anderem:
 
-Wenn Pull oder Build fehlschlagen, **nicht mit Schritt 3 fortfahren**. Die bisherigen Container bleiben in Betrieb. Nur `git pull` oder `docker compose restart` allein aktiviert diese Erweiterung nicht.
+- vorhandene `.env` und Compose-Datei;
+- Docker-Zugriff und verfügbaren Speicher;
+- genau das bisherige Compose-Projekt anhand seiner Containerlabels;
+- bisherige zusätzliche Compose-Dateien, damit individuelle Einstellungen erhalten bleiben;
+- sauberen Branch `master` und einen möglichen Fast-forward auf den bereits abgerufenen GitHub-Stand.
 
-## 3. Dienste anhalten und beide Datenbanken gemeinsam sichern
+Sind mehrere Installationen im selben Ordner vorhanden, den ausdrücklich gewünschten bisherigen Projektnamen angeben, z.B. `sudo bash .runtime/update-runner.sh check --project meinprojekt`. Derselbe Zusatz gehört dann auch zum ersten `run`-Aufruf. Normalerweise wird er automatisch erkannt. Das Skript erfindet keinen neuen Projekt-/Volumenamen.
+
+## 3. Update unabhängig von PuTTY starten
+
+Zuerst die sudo-Anmeldung **im Vordergrund** bestätigen:
 
 ```bash
-dc stop caddy web worker keycloak
-
-dc exec -T db pg_dump -U postgres -d kundenraum -Fc > "$backup_dir/kundenraum.dump"
-dc exec -T identity-db pg_dump -U postgres -d keycloak -Fc > "$backup_dir/keycloak.dump"
-test -s "$backup_dir/kundenraum.dump"
-test -s "$backup_dir/keycloak.dump"
-
-dc exec -T db pg_restore --list < "$backup_dir/kundenraum.dump" > "$backup_dir/kundenraum.contents"
-dc exec -T identity-db pg_restore --list < "$backup_dir/keycloak.dump" > "$backup_dir/keycloak.contents"
-test -s "$backup_dir/kundenraum.contents"
-test -s "$backup_dir/keycloak.contents"
-
-dc exec -T db psql -U postgres -d kundenraum -At -v ON_ERROR_STOP=1 \
-  -c "SELECT 'customers='||COUNT(*) FROM customers; SELECT 'periods='||COUNT(*) FROM periods;" \
-  > "$backup_dir/counts-before.txt"
-cat "$backup_dir/counts-before.txt"
+sudo -v
 ```
 
-Nur bei erfolgreichen Sicherungen fortfahren. Die Archivlistenprüfung erkennt beschädigte Formate; sie ersetzt keinen vollständigen Restore-Test. Alle folgenden Schritte setzen voraus, dass die genannten Datenbanken aus der bisherigen Installation tatsächlich `kundenraum` und `keycloak` heißen. Individuell geänderte Datenbanknamen vorher in diesen Befehlen anpassen.
-
-Bei einem Backupfehler die Ursache beheben und die Sicherung wiederholen; keine Migration starten. Die bisherige Datenbank wurde bis hierhin nicht verändert. Wenn du das Update abbrechen möchtest, den gesicherten Quellstand und das alte Image wie unter Rückkehr beschrieben aktivieren; eine Datenbankrücksicherung ist vor der Migration nicht nötig.
-
-## 4. Datenbank migrieren, laufenden Keycloak-Realm abgleichen, aktivieren
+Danach den Hintergrundlauf starten:
 
 ```bash
-dc up -d --wait db identity-db restore-db keycloak
-dc run --rm migrate
-dc run --rm identity-policy
-dc up -d --wait web worker caddy
-dc ps
+sudo -n nohup bash .runtime/update-runner.sh run > .runtime/server-update-launch.log 2>&1 < /dev/null &
 ```
 
-Erwartete Migrationsausgabe: PostgreSQL **Version 2**. Kundennummern, gespeicherte Zahlungsfälligkeiten und historische Zeiträume bleiben erhalten. Die neuen Felder für Zahlungsmethode und Kassierer starten ohne automatische Zuordnung. Es gibt weiterhin Punkte; es wird kein Preisfeld ergänzt.
+Der eigentliche Updater läuft nun als eigener privilegierter Prozess. Sein Docker-Zugriff hängt nicht von einem später abgelaufenen sudo-Ticket der SSH-Sitzung ab. Git arbeitet bei einem sudo-Start weiterhin als ursprünglicher Installationsbenutzer. `nohup` und die umgeleiteten Ein-/Ausgaben schützen den Lauf vor dem Schließen von PuTTY. Eine Paketinstallation wie tmux ist dafür nicht erforderlich.
 
-`identity-policy` ist für einen **bereits vorhandenen Realm erforderlich**. Ein Realm-Import beim Containerstart aktualisiert vorhandene Realms nicht. Der Befehl wartet auf einen bereiten Keycloak, setzt Realm-/Client-Inaktivität auf 60 Minuten, erhält die separate maximale Sitzungsdauer von 8 Stunden, ergänzt die Kassiererrolle und gleicht den Passwort-/Conditional-OTP-Flow ab. Vorhandene persönliche Konten, Passwörter und OTP-Geräte werden nicht neu angelegt. Bestehende Sitzungen werden beendet; anschließend frisch anmelden.
-
-Die neue separate PostgreSQL-Instanz `restore-db` dient der Uploadprüfung für Web-Wiederherstellungen. Ihre Zugangsdaten werden aus der **bestehenden** Compose-Konfiguration abgeleitet. Dafür sind keine neuen Geheimnisse in `.env` nötig. Die neuen Volumes `restore-db-data` und `restore-safety-backups` bleiben erhalten; letzteres in die externe Serversicherung aufnehmen. Das interne Proxynetz `172.30.93.0/29` muss frei sein. Bei einer Netzüberlappung gemäß [WORKFLOWS.md](WORKFLOWS.md) die zusammengehörigen Proxyadressen anpassen, bevor die Dienste gestartet werden.
-
-Die öffentliche 2FA-IP-Liste wird **leer** ausgeliefert. Die während unseres lokalen Tests aktivierte Ausnahme unter `.runtime/manual-2fa.yml` wird nicht auf deinen Server übertragen. Für Administrator und Mitarbeiter gilt auf dem Server weiterhin OTP, sofern du selbst keine öffentliche IP freigibst. Kassierer benötigen kein OTP. Verwende auf dem Server ausschließlich `compose.server.yml`, keine `compose.acceptance.yml`, Testzertifikate oder lokale `.runtime`-Overlays.
-
-Bei einer Fehlermeldung nicht einfach `bootstrap` oder das Setup erneut ausführen. Bei ungültigem Keycloak-Wartungszugang einen gültigen internen Verwaltungszugang in der vorhandenen `.env` konfigurieren und `identity-policy` erneut ausführen. Das ist ein anderer Zugang als dein persönlicher Administrator-Login.
-
-## 5. Nach dem Update prüfen
+Nach einigen Sekunden den Status prüfen:
 
 ```bash
-dc exec -T db psql -U postgres -d kundenraum -At -v ON_ERROR_STOP=1 \
-  -c "SELECT version FROM schema_migrations ORDER BY version; SELECT 'customers='||COUNT(*) FROM customers; SELECT 'periods='||COUNT(*) FROM periods;"
-dc exec -T web printenv SESSION_IDLE_SECONDS
-dc exec -T web node -e "fetch('http://127.0.0.1:3000/api/v1/health').then(async r=>{console.log(r.status,await r.text());process.exit(r.ok?0:1)}).catch(()=>process.exit(1))"
-dc logs --tail=60 web worker keycloak caddy
+sudo bash .runtime/update-runner.sh status
 ```
 
-Erwartet: Migrationen 1 und 2, unveränderte Kunden-/Periodenzahlen gegenüber `counts-before.txt`, `SESSION_IDLE_SECONDS=3600` und Health-HTTP **200**. Die zusätzliche Restore-Instanz besitzt keine öffentlich erreichbaren Ports. Die ursprünglichen Kunden- und Identity-Volumes sowie die Caddy-Zertifikatsvolumes bleiben dieselben.
-
-Öffne anschließend **deine bisherige Domain** und lade die Seite vollständig neu:
-
-1. Mit dem bisherigen persönlichen Administrator anmelden und vorhandene Kunden prüfen.
-2. Reports → Offene Zahlungen: Als bezahlt markieren bezahlt den angezeigten Zeitraum. Zum Funktionstest einen eigenen Testkunden verwenden, keinen echten offenen Posten unbeabsichtigt bezahlen.
-3. Einstellungen → Login-Konten: Bei Bedarf Kassierer anlegen; anschließend konkrete Kunden im Kundenformular zuweisen. Kassierer sehen nur ihre eigenen offenen aktuellen Zeiträume mit Telefon, MAC/Kennung, Adresse, Punkten und Zahlungsdaten.
-4. Telegram: erste tägliche Zeit, optional zweite Zeit einstellen. Die vorhandenen Ein-/Aus-Schalter bleiben erhalten. Einen Testversand ausschließlich an den dafür vorgesehenen Empfänger ausführen.
-5. Einstellungen → Datenbank-Backup: ein Backup herunterladen und sicher aufbewahren. Einen Restore-Test ausschließlich in einer separaten Testumgebung durchführen.
-
-Eine zusätzliche DNS-/Domain-/HTTPS-Einrichtung ist bei unveränderter Domain nicht erforderlich. Alle Details zu Rollen, IP-Liste, Telegram und Wiederherstellung stehen in [WORKFLOWS.md](WORKFLOWS.md).
-
-## Rückkehr zum vorherigen Stand
-
-Bei einem Fehler während des Updates und **bevor der neue Stand wieder für echte Schreibzugriffe geöffnet wurde**, kannst du zum gemeinsamen Wartungsbackup zurückkehren. Wurde bereits im neuen Stand gearbeitet, würde das Zurückspielen diese späteren Änderungen verlieren. In diesem Fall zuerst beide aktuellen Datenbanken zusätzlich sichern und die Übernahme dieser Änderungen planen.
-
-Die folgenden Schritte sind eine bewusste Rücksicherung: Sie ersetzen beide Datenbanken durch die gesicherten Stände. **Nur bei tatsächlich notwendigem Rollback ausführen**, nicht nach einem erfolgreichen Update. Prüfe zuerst den angezeigten Sicherungspfad und beide Dumps. Keine Volumes löschen und kein `down -v` ausführen.
-
-Wenn dieselbe SSH-Sitzung noch offen ist, sind `backup_dir` und `dc` bereits gesetzt. Nach einer neuen Anmeldung zuerst den tatsächlichen Sicherungspfad einsetzen:
+Erwartet ist ein gespeicherter Sicherungspfad, dein bisheriger Projektname, ein aktueller Schritt und die Meldung, dass der Prozess läuft. Wenn noch kein Lauf gespeichert wurde, das Startprotokoll lesen:
 
 ```bash
-set -euo pipefail
+tail -n 60 .runtime/server-update-launch.log
+```
+
+Ein fehlgeschlagenes `sudo -n` oder eine Vorprüfung hat dann noch keine Anwendung gestoppt. Das erste `sudo -v` im Vordergrund muss erfolgreich gewesen sein.
+
+## Was der Updater in welcher Reihenfolge macht
+
+| Schritt | Aktion |
+|---|---|
+| `01-snapshot` | Alte Commit-ID, Quellarchiv, `.env`, Compose-Datei und das tatsächlich laufende alte Dockerimage sichern. |
+| `02-source` | Fast-forward auf den zuvor abgerufenen GitHub-Commit; prüfen, dass `.env` unverändert bleibt. Kein Reset, kein automatischer Konflikt-Merge. |
+| `03-build` | Neues Web-/Workerimage bauen. Bis hier läuft die bisherige Anwendung weiter. |
+| `04-stop` | Caddy, Web, Worker und Keycloak für die Wartung anhalten. PostgreSQL und Docker selbst bleiben in Betrieb. |
+| `05-backups` | Beide Datenbanken gemeinsam im Custom-Format sichern, Archivlisten und Prüfsummen erstellen und Kunden-/Periodenzahlen festhalten. |
+| `06-databases` | Bisherige Datenbankdienste und Keycloak starten, separate neue Restore-Datenbank bereitstellen. Bestehende Volumes bleiben erhalten. |
+| `07-migration` | Anwendungsschema in einer Transaktion auf Version 2 migrieren. |
+| `08-keycloak` | Auf die Startbereitschaft warten und den vorhandenen Realm abgleichen, inklusive Kassiererrolle und 60-Minuten-Inaktivität. |
+| `09-counts` | Vor Freigabe der Schreibdienste unveränderte Kunden-/Periodenzahlen und beide Dump-Prüfsummen prüfen. |
+| `10-activate` | Web, Worker und Caddy starten und deren Bereitschaft abwarten. |
+| `11-health` | Anwendungsgesundheit prüfen und den Lauf als erfolgreich markieren. |
+
+Vorhandene Kundennummern, historische Fälligkeiten, Benutzer, Passwörter und OTP-Geräte bleiben erhalten. Es gibt weiterhin Punkte, kein neues Preisfeld. Die lokale 2FA-Testausnahme unseres Entwicklungsrechners wird nicht übertragen; die öffentliche Produktionsliste bleibt leer. Verwende auf dem Server keine `compose.acceptance.yml` und keine lokalen Test-Overlays.
+
+Während der Schritte 04 bis 10 ist die Weboberfläche vorübergehend nicht erreichbar. Das ist die angekündigte Wartung, keine Docker-Deinstallation. Bei Fehlern stoppt der **Update-Prozess**, nicht deine übergeordnete SSH-Shell. Die Wartung bleibt gegebenenfalls bestehen, bis du den konkreten Fehler behebst und fortsetzt. Es findet keine ungefragte Datenbankrücksicherung statt.
+
+## Nach neuer PuTTY-Anmeldung: Status, Protokoll und Fortsetzen
+
+Diese Befehle brauchen keine Variablen oder Funktionen aus der vorherigen Sitzung:
+
+```bash
 cd /opt/kundenraum/kundenverwaltung/kundenverwaltung
-app_dir="$PWD"
-repo_dir="$(git rev-parse --show-toplevel)"
-read -r -p 'Vollständiger Pfad zur Update-Sicherung: ' backup_dir
-test -d "$backup_dir"
-test -s "$backup_dir/commit-before.txt"
-test -s "$backup_dir/server.env"
-test -s "$backup_dir/kundenraum.dump"
-test -s "$backup_dir/keycloak.dump"
-dc() { sudo docker compose -f compose.server.yml "$@"; }
-printf 'Rücksicherung aus: %s\n' "$backup_dir"
+sudo bash .runtime/update-runner.sh status
 ```
 
-Auch hier gegebenenfalls denselben eigenen Compose-Projektnamen in `dc` ergänzen. Danach nur bei bestätigtem Ziel fortfahren:
+Ist der Prozess noch aktiv, keinen zweiten starten. Ist der Status `failed`, zunächst die vollständigen letzten Meldungen und Docker-Diagnose ansehen:
 
 ```bash
-umask 077
-dc stop caddy web worker keycloak
-# Auch den aktuellen Fehlerzustand vor der Rücksicherung erhalten.
-dc exec -T db pg_dump -U postgres -d kundenraum -Fc > "$backup_dir/before-rollback-kundenraum.dump"
-dc exec -T identity-db pg_dump -U postgres -d keycloak -Fc > "$backup_dir/before-rollback-keycloak.dump"
-
-dc exec -T db dropdb -U postgres --if-exists --force kundenraum
-dc exec -T db createdb -U postgres -O kundenraum kundenraum
-dc exec -T db pg_restore -U postgres --role=kundenraum --no-owner --no-acl --exit-on-error -d kundenraum < "$backup_dir/kundenraum.dump"
-
-dc exec -T identity-db dropdb -U postgres --if-exists --force keycloak
-dc exec -T identity-db createdb -U postgres -O keycloak keycloak
-dc exec -T identity-db pg_restore -U postgres --role=keycloak --no-owner --no-acl --exit-on-error -d keycloak < "$backup_dir/keycloak.dump"
-
-git -C "$repo_dir" switch --detach "$(cat "$backup_dir/commit-before.txt")"
-cp -p "$backup_dir/server.env" .env
-rollback_image="$(cat "$backup_dir/rollback-image.txt")"
-if ! sudo docker image inspect "$rollback_image" >/dev/null 2>&1; then
-  gzip -dc "$backup_dir/application-image.tar.gz" | sudo docker image load
-fi
-sudo docker image tag "$rollback_image" "$(cat "$backup_dir/original-image.txt")"
-dc up -d --wait db identity-db keycloak web worker caddy
-dc ps
+sudo tail -n 100 .runtime/server-update/last-attempt.log
+sudo bash .runtime/update-runner.sh logs
 ```
 
-Der alte Quellstand, das alte Image, die alte `.env` und beide Datenbanken gehören danach wieder zusammen. Nicht zusätzlich die neue Migration gegen den zurückgesicherten alten Stand ausführen. Die ungenutzten neuen Restore-Volumes können bestehen bleiben. Nach der Rückkehr neu anmelden und Kunden-/Periodenzahlen prüfen. Ein späterer neuer Updateversuch beginnt wieder mit `git switch master` und einer frischen Wartungssicherung.
+`logs` verwendet automatisch den gespeicherten Projektnamen und die gespeicherten Compose-Dateien. Für einen Fehlerbericht reichen Schritt, Exit-Code und die konkrete Fehlermeldung; keine `.env`, Passwörter oder Dumps veröffentlichen.
+
+Nach Behebung der Ursache wieder im Hintergrund fortsetzen:
+
+```bash
+sudo -v
+```
+
+```bash
+sudo -n nohup bash .runtime/update-runner.sh resume > .runtime/server-update-launch.log 2>&1 < /dev/null &
+```
+
+`resume` liest den gesicherten Lauf ein. Abgeschlossene Phasen werden übersprungen. Insbesondere werden das ursprüngliche Wartungsbackup und das alte Image nicht durch neue Sicherungen überschrieben. Eine unvollständig ausgeführte Migration bzw. der Realm-Abgleich darf erneut ausgeführt werden; beide sind wiederholbar. Ein bereits vollständig abgeschlossener Lauf wird durch `resume` nicht noch einmal ausgeführt.
+
+Typische Ursachen sind fehlender Speicher, Registry-/DNS-Zugriff beim Build, eine Docker-Netzüberlappung oder ein ungültiger interner Keycloak-Wartungszugang. Das konkrete Protokoll entscheidet. Beim Keycloak-Wartungszugang geht es um `KEYCLOAK_ADMIN_USER/PASSWORD`, nicht um dein persönliches Kundenraum-Administratorkonto. Nach einer bewussten Korrektur der vorhandenen `.env` kannst du den fehlgeschlagenen Schritt fortsetzen; die ursprüngliche `.env` liegt weiterhin im Update-Sicherungsverzeichnis.
+
+Wenn zusätzlich der Server selbst neu gestartet oder nicht erreichbar war, können diese **lesenden** Befehle helfen:
+
+```bash
+sudo journalctl -u docker -n 80 --no-pager
+sudo journalctl -k -n 100 --no-pager
+df -h
+```
+
+Damit lassen sich z.B. ein Dienstfehler oder Speicherprobleme prüfen. Ein Verbindungsabbruch allein belegt weder deren Ursache noch eine Docker-Deinstallation.
+
+## Erfolg kontrollieren
+
+Bei `Status: complete` deine **bisherige Domain** im Browser öffnen und vollständig neu laden. Wegen des Realm-/Sitzungsabgleichs neu mit deinem bisherigen persönlichen Administrator anmelden.
+
+Prüfe die vorhandenen Kunden, Servicehistorien und Zahlungen. Reports haben den Bezahl-Button; Kassierer sehen nur ihre zugewiesenen offenen Kunden mit Telefon, MAC/Kennung, Adresse und Punkten. Versand- und Backup-Einstellungen bleiben erhalten. Für Zahlungs-/Restore-Tests eigene Testdaten bzw. eine separate Testumgebung verwenden.
+
+Sicherungen und das ausführliche Updateprotokoll liegen unter dem vom Status genannten `backups/server-update-…`-Verzeichnis. Es enthält vertrauliche Daten und gehört zusätzlich in eine geschützte externe Serversicherung. Diese Dateien werden nicht automatisch gelöscht. Der Updater benötigt keine neue `.env`, kein Setup/Bootstrap und keine neue DNS-/HTTPS-Einrichtung bei unveränderter Domain.
+
+## Abbrechen oder auf Snapshot zurückgehen
+
+Der Updater führt **keinen automatischen Restore**, kein `dropdb`, kein `down -v` und kein Löschen von Volumes aus. Bevor du einen Snapshot zurückspielst, darf kein Update-Prozess mehr laufen. Nutze dazu das im Status/Protokoll gespeicherte Prozess-/Schrittbild und beende einen tatsächlich noch laufenden Updater bewusst; nicht parallel Snapshot und Update ausführen.
+
+Wenn bereits die Migration versucht wurde, nicht nur alte Quelldateien über den neuen Datenbankstand kopieren. Für eine vollständige Rückkehr gehören altes Image, Konfiguration und beide Datenbanken aus demselben Sicherungszeitpunkt zusammen. Die Update-Sicherung enthält `server.env`, `source-before.tar`, `application-image.tar.gz`, `db.dump`, `identity-db.dump` und die Commit-/Projektinformationen. Eine Rücksicherung überschreibt spätere Änderungen und muss ausdrücklich geplant werden. Dein bereits angekündigter zusammengehöriger Server-Snapshot ist dafür ein eigener Rückkehrweg.
+
+Weitere fachliche Betriebsinformationen: [WORKFLOWS.md](WORKFLOWS.md). Die direkte alte `dc`-Befehlsfolge ist durch dieses Skript ersetzt.

@@ -4,16 +4,7 @@ Diese Erweiterung verwendet die vorhandene Anwendung im inneren Projekt `kundenv
 
 ## Bestehenden Server aktualisieren
 
-Vorher die dokumentierte PostgreSQL- und Keycloak-Sicherung erstellen. Im inneren Projekt mit der vorhandenen Server-.env:
-
-```bash
-docker compose -f compose.server.yml build web
-docker compose -f compose.server.yml stop web worker
-docker compose -f compose.server.yml run --rm migrate
-docker compose -f compose.server.yml up -d --wait db identity-db restore-db keycloak
-docker compose -f compose.server.yml run --rm identity-policy
-docker compose -f compose.server.yml up -d --wait web worker caddy
-```
+Für einen bereits laufenden Server die [fortsetzbare Update-Anleitung](UPDATE.md) verwenden. Sie sichert das alte Image und beide Datenbanken vor der Migration und dem Realm-Abgleich. Der eigenständige Hintergrundlauf ersetzt die frühere manuelle `dc`-Befehlsfolge und bleibt nach einer neuen PuTTY-Anmeldung prüfbar.
 
 Die bisherigen Servergeheimnisse bleiben erhalten. `restore-db` ist eine eigene interne PostgreSQL-Instanz mit separatem Datenvolume. Sie veröffentlicht keinen Hostport. Der Datenbankname muss sich auch bei eigener Konfiguration von der Live-Datenbank unterscheiden; dies wird vor dem Einlesen geprüft. Der Restore-Benutzer hat weder Superuser-, CREATEDB- noch CREATEROLE-Rechte. Nur die Webanwendung erreicht zusätzlich dieses Netz. Sicherheitsbackups liegen dauerhaft im Volume `restore-safety-backups`, im Webcontainer unter `/app/backups`. Dieses Volume in die externe Serversicherung aufnehmen. Bei bereits bestehenden externen Docker-Netzen muss das ausschließlich für Caddy/Keycloak verwendete Netz `172.30.93.0/29` frei sein; bei einer Anpassung Caddy-Adresse, Keycloak-Adresse, Proxyziel und `KC_PROXY_TRUSTED_ADDRESSES` gemeinsam ändern.
 

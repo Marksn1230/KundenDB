@@ -386,34 +386,7 @@ sudo docker compose -f compose.server.yml up -d keycloak web worker caddy
 
 ### Neue Version von GitHub beziehen
 
-Vorher das Wartungsbackup erstellen, Releasehinweise lesen und Zielversion auswählen. Datenbank-/Keycloak-Major-Upgrades benötigen einen eigenen Plan.
-
-~~~bash
-set -euo pipefail
-cd /opt/kundenraum
-test -z "$(git status --porcelain --untracked-files=no)"
-git fetch origin --tags
-git tag --list --sort=-version:refname
-read -r -p 'Ziel: vorhandener Release-Tag oder origin/master: ' UPDATE_REF
-test -n "$UPDATE_REF"
-git rev-parse --verify "$UPDATE_REF^{commit}"
-git switch --detach "$UPDATE_REF"
-cd /opt/kundenraum/kundenverwaltung/kundenverwaltung
-sudo docker compose -f compose.server.yml config --quiet
-sudo docker compose -f compose.server.yml stop caddy web worker keycloak
-sudo docker compose -f compose.server.yml build web
-sudo docker compose -f compose.server.yml up -d --wait db identity-db
-sudo docker compose -f compose.server.yml run --rm migrate
-sudo docker compose -f compose.server.yml up -d keycloak
-sudo docker compose -f compose.server.yml run --rm identity-config
-sudo docker compose -f compose.server.yml up -d --force-recreate web worker caddy
-sudo docker compose -f compose.server.yml ps
-sudo ./scripts/configure-domain.sh --status
-~~~
-
-APP_VERSION ist ein lokaler Image-Tag, kein Git-Releasewähler; der Build belegt ihn neu. Bei eigener Tagkonvention vor dem Build kontrolliert ändern. force-recreate übernimmt sicher das gerade gebaute gemeinsame Image. .env und Volumes bleiben erhalten.
-
-Bei Fehlern anhalten; bei fehlgeschlagener Migration Schreibdienste gestoppt lassen. Ein Git-Rollback macht Migrationen nicht rückgängig. Dafür das zusammengehörige Release/Backup wiederherstellen. Danach alle technischen Prüfungen und den Browserlogin aus Abschnitt 5 wiederholen.
+Für bereits laufende Installationen ausschließlich die [aktuelle Update-Anleitung](UPDATE.md) verwenden. Sie sichert das alte Image und beide Datenbanken, erhält den bestehenden Compose-Projektnamen und gleicht den vorhandenen Realm ab. Der Hintergrundlauf protokolliert jeden Schritt und ist nach einem PuTTY-Abbruch mit `status` und `resume` fortsetzbar. Kein interaktives `set -e`, keine temporäre `dc`-Funktion und kein erneutes Bootstrap verwenden.
 
 ### Backup in der Weboberfläche herunterladen
 

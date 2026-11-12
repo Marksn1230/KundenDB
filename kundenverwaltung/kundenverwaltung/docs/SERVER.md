@@ -130,20 +130,7 @@ Bei einem fehlgeschlagenen Dump **kein Update** durchführen; Status/Plattenplat
 
 ### Update
 
-Nach erfolgreicher Sicherung neue Quelldateien bereitstellen. .env, backups und transfer erhalten; keine lokalen Entwicklungsdaten hochladen. APP_VERSION in .env auf die neue Releaseversion setzen. Anschließend:
-
-```bash
-set -e
-cd /opt/kundenraum
-sudo docker compose -f compose.server.yml stop caddy web worker
-sudo docker compose -f compose.server.yml build web
-sudo docker compose -f compose.server.yml run --rm migrate
-sudo docker compose -f compose.server.yml up -d keycloak web worker caddy
-sudo docker compose -f compose.server.yml ps
-sudo docker compose -f compose.server.yml logs --tail=60 web worker
-```
-
-Bei einer fehlgeschlagenen Migration Schreibdienste gestoppt lassen und Fehler beheben oder zusammengehöriges Release/Backup wiederherstellen. Datenbank- und Keycloak-Major-Upgrades benötigen eigene Upgradeplanung; nicht unkontrolliert Image-Tags ändern.
+Für vorhandene Installationen gilt die [aktuelle Update-Anleitung](UPDATE.md) mit Sicherungen, protokolliertem Hintergrundlauf und Fortsetzen nach einem PuTTY-Abbruch. Die frühere interaktive Befehlsfolge ist ersetzt. Datenbank- und Keycloak-Major-Upgrades benötigen weiterhin einen eigenen Plan.
 
 ### Wiederherstellung (überschreibt den aktuellen Bestand)
 
@@ -315,18 +302,7 @@ Danach neu anmelden und Konten, Historie, Zahlung, anonyme API-Verweigerung sowi
 
 ## Einmaliges Update auf die Domain-/Import-Erweiterung
 
-Vorher Wartungssicherung aus Abschnitt 6 erstellen. Neue Quelldateien übernehmen, .env und Volumes erhalten, APP_VERSION in .env auf 0.4.0 setzen. Das neue Image einmal regulär bauen; spätere Domain-/HTTPS-Wechsel verwenden ausschließlich den Assistenten.
-
-```bash
-set -e
-cd /opt/kundenraum
-sed -i 's/^APP_VERSION=.*/APP_VERSION=0.4.0/' .env
-sudo docker compose -f compose.server.yml stop caddy web worker
-sudo docker compose -f compose.server.yml build web
-chmod +x scripts/configure-domain.sh
-sudo ./scripts/configure-domain.sh
-sudo docker compose -f compose.server.yml up -d worker
-```
+Auch ältere Installationen über die [aktuelle Update-Anleitung](UPDATE.md) aktualisieren. Bei unveränderter Domain ist kein erneuter Domain-Assistent erforderlich. Für spätere bewusste Domain-/HTTPS-Wechsel gilt [DOMAIN.md](DOMAIN.md).
 
 ## Kundenverwaltung: neue Arbeitsabläufe
 
