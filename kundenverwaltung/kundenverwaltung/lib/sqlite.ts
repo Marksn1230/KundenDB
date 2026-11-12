@@ -82,6 +82,31 @@ export function db() {
     try{connection.exec("ALTER TABLE customers ADD COLUMN mac_mode TEXT NOT NULL DEFAULT 'mac' CHECK(mac_mode IN ('mac','identifier')); ALTER TABLE integration_settings ADD COLUMN default_country TEXT NOT NULL DEFAULT 'AT'; ALTER TABLE oauth_attempts ADD COLUMN return_to TEXT NOT NULL DEFAULT '/'; CREATE TABLE bulk_batches(id TEXT PRIMARY KEY,actor TEXT NOT NULL,action TEXT NOT NULL CHECK(action IN ('paid','whatsapp')),payload TEXT NOT NULL,expires_at INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'preview',result TEXT); PRAGMA user_version=4; COMMIT");}
     catch(error){connection.exec('ROLLBACK');throw error;}
   }
+  if(version<5){
+    connection.exec('PRAGMA wal_checkpoint(FULL)');
+    if(existed)copyFileSync(filename,filename+'.before-v5-'+Date.now()+'.bak');
+    connection.exec('PRAGMA foreign_keys=OFF; BEGIN IMMEDIATE');
+    try{connection.exec(`ALTER TABLE customers ADD COLUMN payment_method TEXT CHECK(payment_method IN ('Bar','Konto'));
+ALTER TABLE customers ADD COLUMN payment_account TEXT NOT NULL DEFAULT '';
+ALTER TABLE customers ADD COLUMN cashier_subject TEXT REFERENCES principals(subject);
+ALTER TABLE integration_settings ADD COLUMN telegram_minute INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE integration_settings ADD COLUMN telegram_second_time TEXT;
+ALTER TABLE web_sessions ADD COLUMN refresh_token TEXT;
+ALTER TABLE web_sessions ADD COLUMN token_expires_at BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE web_sessions ADD COLUMN last_activity_at BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE web_sessions ADD COLUMN authenticated_at BIGINT NOT NULL DEFAULT 0;
+CREATE TABLE maintenance (id INTEGER PRIMARY KEY CHECK(id=1), active INTEGER NOT NULL DEFAULT 0);
+INSERT INTO maintenance(id) VALUES(1);
+
+      CREATE TABLE principals_v5(subject TEXT PRIMARY KEY,username TEXT NOT NULL,name TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('admin','employee','cashier')),active INTEGER NOT NULL DEFAULT 1,not_before INTEGER NOT NULL DEFAULT 0);
+      INSERT INTO principals_v5 SELECT * FROM principals;
+      DELETE FROM web_sessions;
+      DROP TABLE principals;
+      ALTER TABLE principals_v5 RENAME TO principals;
+      UPDATE deliveries SET dedupe_key=dedupe_key||':1' WHERE channel='telegram' AND mode='production' AND length(dedupe_key)=13 AND substr(dedupe_key,1,3)='tg:';
+      PRAGMA user_version=5; COMMIT;`);
+    }catch(error){connection.exec('ROLLBACK');throw error;}finally{connection.exec('PRAGMA foreign_keys=ON');}
+  }
   globalDb.kundenDb = connection;
   return connection;
 }

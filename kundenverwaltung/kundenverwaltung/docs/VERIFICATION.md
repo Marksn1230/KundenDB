@@ -93,3 +93,33 @@ Weiterhin erfolgreich: echter nativer PostgreSQL-17.11-Dump und Restore in zweit
 Anleitungen: docs/DOMAIN.md (Ersteinrichtung, Aktivierung, Wechsel, Status, Staging und Rückkehr), docs/SERVER.md (Installation/Import), docs/API.md und docs/openapi.json. Vorlagen import-vorlage.csv/.xlsx und import-ohne-serviceende.csv sind aktualisiert und enthalten ausschließlich fiktive Daten. Keine Schema-Migration ist für diese Änderungen erforderlich; Bestandsdaten und persönliche Logins werden beibehalten.
 
 Abschließender Dienstcheck dieses Stands: http://localhost:3000/api/v1/health → 200, neue Fälligkeits-API anonym → 401, echtes Keycloak-Loginformular unter http://localhost:3000/auth erreichbar, Worker-Heartbeat aktuell. Vorhandenes Konto maki wurde beibehalten.
+
+## Abnahme der Kundenverwaltungs-Erweiterungen am 12.11.2026
+
+Status: technische Abnahme erfolgreich; manuelle Anwenderfreigabe und anschließender Commit/Push stehen ausdrücklich noch aus. Branch: `master`; Ausgangscommit unverändert `cb4da6b`.
+
+- `npm run check`, `npm run build`, Docker-Produktionsbuild: erfolgreich.
+- `npm test`: **67 bestanden, 0 fehlgeschlagen, 0 übersprungen**. Einschließlich SQLite-Bestandsmigration und PostgreSQL-Bestandsmigration mit historischen Fälligkeiten, unveränderter Versandstunde, unzugeordneten neuen Feldern und Widerruf alter Websitzungen.
+- `tests/acceptance-docker.mjs`: echte HTTPS-Anmeldung mit Keycloak 26.8.2; Administrator mit OTP; zwei Kassierer ohne OTP; eigene Listen; direkte Seiten und fremde API-Aufrufe gesperrt; aktuelle Zahlung, sofortiges Entfernen und idempotente Wiederholung.
+- Anlegen und Bearbeiten: Außenklick, X und Escape mit/ohne Änderungen; Weiter bearbeiten erhält Eingaben; Zurücksetzen und Verwerfen geprüft.
+- Web-Backup heruntergeladen und über denselben Webdialog hochgeladen, auf der separaten Restore-Instanz verarbeitet, ausdrücklich bestätigt, Sicherheitsbackup erstellt und Daten atomar ersetzt. Beschädigtes Archiv und über fünf Minuten alte Administrator-Anmeldung abgewiesen. Ein temporärer Datenbanktrigger erzeugte gezielt einen Fehler nach Beginn der Umschaltung: vorheriger Datenstand vollständig erhalten, Fehler auditiert, Wartungsmodus freigegeben. Testtrigger und Testfunktion anschließend entfernt.
+- `tests/acceptance-security.mjs`: kontrollierte freigegebene IPv4-Quelladresse im isolierten, nicht gerouteten Testnetz; andere Adresse; gefälschte X-Forwarded-/Forwarded-/OTP-Header; direkter untrusted Keycloak-Zugriff; sofortiger Entzug nach Caddy-Reload. IPv6-Listenvalidierung zusätzlich im automatisierten Testsatz.
+- Echte verkürzte Sitzung mit 3 Sekunden App-Inaktivität, 10 Sekunden Realm-/Client-Inaktivität und 1 Sekunde Access-Token: Refresh erfolgreich; Hintergrundabfragen verlängern die App-Inaktivität nicht; erneute Passwortanmeldung erforderlich. Effektive Einstellungen danach wieder 3600 Sekunden für Realm, Clients und Web; Token 900 Sekunden; leere öffentliche IP-Freigabeliste.
+- `tests/acceptance-scheduler.mjs`: vier parallele PostgreSQL-Workerprozesse, zwei simulierte Tagesberichte, genau zwei Transporte; nach echtem Worker-Neustart keine Wiederholung. Sommerzeitlücke und doppelte Herbststunde im automatisierten Testsatz geprüft. Kein realer Versand; Produktivschalter anschließend ausgeschaltet.
+- `identity-policy` gegen den laufenden Testrealm zweimal erfolgreich ausgeführt; vorhandene Benutzer und OTP-Anmeldungen bleiben verwendbar.
+
+Isoliertes Compose-Projekt: `kundenraum-workflows-test`. Test-URL: **https://kundenraum.localhost**. Web, Worker, Keycloak, Caddy, Kundendatenbank, Identity-Datenbank und separate Restore-Datenbank bleiben gestartet. HTTP/HTTPS sind ausschließlich an Loopback gebunden. Das HTTPS-Zertifikat stammt aus der lokalen Caddy-Test-CA. Persönliche Bestandsdaten und die ursprüngliche `.env` wurden nicht für diese Testdatenbank verwendet.
+
+Testrollen und Passwörter einschließlich Admin-TOTP-Schlüssel stehen ausschließlich lokal in `.runtime/workflows-access.txt`; keine Geheimnisse oder Dumps im Repository. Beide Kassierer haben zugewiesene offene Testkunden. Installations-, Realm-Abgleich-, Telegram- und Wiederherstellungsablauf einschließlich Rückkehr zum Sicherheitsbackup: [WORKFLOWS.md](WORKFLOWS.md).
+
+Erst nach ausdrücklicher manueller Freigabe des Anwenders committen und zu `orgin/master` pushen. Bis dahin bleiben die Änderungen uncommitted.
+
+## Nachbesserung während des manuellen Tests
+
+Reports enthalten nun Als bezahlt markieren für offene aktuelle und historische Perioden, auch ohne Fälligkeitsdatum. Kassierer sehen responsive Kundenkarten mit Telefon, MAC/Kennung, Adresse/PLZ, Punkten, Service- und Zahlungsdaten sowie Kommentar. Auf ausdrücklichen Anwenderwunsch bleiben Punkte unverändert; kein Preisfeld und keine weitere Migration. Die Verlängerungsvorschau zeigt die berechnete Fälligkeit statt des Beginns.
+
+Produktionsbuild, Docker-Build und alle 68 Tests erfolgreich, darunter Browserprüfungen der Report-Zahlungen und Verlängerungsfälligkeit. tests/acceptance-reports-cashier.mjs prüfte mit echtem Keycloak im laufenden Docker-Testprojekt die historische Zahlungsaktion, vollständige Kundendaten, Punkte 0, die Handyansicht ohne Überlauf und unveränderte Zuweisungsbeschränkungen. Für beide Kassierer bleiben offene Beispielkunden mit vollständigen Daten verfügbar. Die vom Anwender gewünschte lokale 2FA-Ausnahme bleibt über .runtime/manual-2fa.yml aktiv; die verwaltete öffentliche Produktionsliste bleibt leer. Weiterhin kein Commit/Push vor der manuellen Freigabe.
+
+## Freigabe und Vorbereitung der GitHub-Auslieferung
+
+Der Anwender hat Commit und Push nach dem manuellen Test ausdrücklich freigegeben. Abschließend: TypeScript-Prüfung, Produktionsbuild und alle 69 Tests bestanden, einschließlich des verzögerten Keycloak-Starts und des wiederholbaren Realm-Abgleichs. Docker-Build erfolgreich. Alle sieben Bash-Befehlsblöcke der neuen Update-Anleitung syntaktisch geprüft. [UPDATE.md](UPDATE.md) beschreibt die Aktualisierung einer laufenden bisherigen GitHub-Version mit unveränderter .env, gesichertem Altimage, gemeinsamer Wartungssicherung beider Datenbanken, Migration, Realm-Abgleich, Aktivierung und Rückkehr. Lokale Testzugänge und die ausdrücklich gewünschte lokale 2FA-Ausnahme verbleiben ausschließlich in ignorierten Laufzeitdateien. Die öffentliche verwaltete IP-Liste wird leer ausgeliefert.

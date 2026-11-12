@@ -44,8 +44,8 @@ test('Caddy sperrt private Keycloak-Pfade vor dem Proxy und lässt Anmeldung sow
  const upstreamPort=(upstream.address() as {port:number}).port;
  const reservation=createServer();await new Promise<void>(resolve=>reservation.listen(0,'127.0.0.1',resolve));
  const port=(reservation.address() as {port:number}).port;await new Promise<void>(resolve=>reservation.close(()=>resolve()));
- const routes=readFileSync('deploy/routes.caddy','utf8').replaceAll('keycloak:8080','127.0.0.1:'+upstreamPort).replaceAll('web:3000','127.0.0.1:'+upstreamPort);
- writeFileSync(path.join(folder,'routes.caddy'),routes);
+ const routes=readFileSync('deploy/routes.caddy','utf8').replaceAll('172.30.93.3:8080','127.0.0.1:'+upstreamPort).replaceAll('web:3000','127.0.0.1:'+upstreamPort);
+ writeFileSync(path.join(folder,'routes.caddy'),routes);writeFileSync(path.join(folder,'mfa-allowlist.caddy'),'# empty allowlist\n');
  writeFileSync(path.join(folder,'Caddyfile'),'{\n admin off\n auto_https off\n}\nhttp://127.0.0.1:'+port+' {\n import routes.caddy\n}\n');
  const child=spawn(caddy,['run','--config',path.join(folder,'Caddyfile'),'--adapter','caddyfile'],{windowsHide:true,stdio:'ignore'});
  t.after(async()=>{if(child.exitCode===null){child.kill();await new Promise<void>(resolve=>child.once('exit',()=>resolve()));}});

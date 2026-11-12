@@ -27,6 +27,27 @@
       "CustomerInput": {
         "type": "object",
         "properties": {
+          "payment_method": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "Bar",
+              "Konto",
+              null
+            ]
+          },
+          "payment_account": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "cashier_subject": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "name": {
             "type": "string",
             "minLength": 1,
@@ -109,7 +130,9 @@
               "string",
               "null"
             ],
-            "format": "date"
+            "format": "date",
+            "readOnly": true,
+            "description": "Servicebeginn plus ein Kalendermonat; historische Fälligkeiten bleiben erhalten."
           },
           "payment_status": {
             "type": "string",
@@ -151,6 +174,27 @@
       "Customer": {
         "type": "object",
         "properties": {
+          "payment_method": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "Bar",
+              "Konto",
+              null
+            ]
+          },
+          "payment_account": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "cashier_subject": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "name": {
             "type": "string",
             "minLength": 1,
@@ -233,7 +277,9 @@
               "string",
               "null"
             ],
-            "format": "date"
+            "format": "date",
+            "readOnly": true,
+            "description": "Servicebeginn plus ein Kalendermonat; historische Fälligkeiten bleiben erhalten."
           },
           "payment_status": {
             "type": "string",
@@ -296,6 +342,9 @@
           }
         },
         "required": [
+          "payment_method",
+          "payment_account",
+          "cashier_subject",
           "name",
           "mac_address",
           "phone",
@@ -522,6 +571,27 @@
           "data": {
             "type": "object",
             "properties": {
+              "payment_method": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "Bar",
+                  "Konto",
+                  null
+                ]
+              },
+              "payment_account": {
+                "type": "string",
+                "maxLength": 160
+              },
+              "cashier_subject": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "name": {
                 "type": "string",
                 "minLength": 1,
@@ -604,7 +674,9 @@
                   "string",
                   "null"
                 ],
-                "format": "date"
+                "format": "date",
+                "readOnly": true,
+                "description": "Servicebeginn plus ein Kalendermonat; historische Fälligkeiten bleiben erhalten."
               },
               "payment_status": {
                 "type": "string",
@@ -786,6 +858,9 @@
             "additionalProperties": {
               "type": "string",
               "enum": [
+                "payment_method",
+                "payment_account",
+                "cashier_subject",
                 "name",
                 "mac_address",
                 "phone",
@@ -1134,6 +1209,20 @@
             "maxLength": 2,
             "example": "AT",
             "description": "ISO-Ländercode als Standard für lokale Telefonnummern."
+          },
+          "telegram_minute": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 59,
+            "default": 0
+          },
+          "telegram_second_time": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+            "default": null
           }
         },
         "required": [
@@ -1401,6 +1490,47 @@
           "page",
           "per_page",
           "data"
+        ],
+        "additionalProperties": false
+      },
+      "RestoreJob": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "enum": [
+              "validating",
+              "ready",
+              "restoring",
+              "complete",
+              "failed"
+            ]
+          },
+          "step": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "safety_backup": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "step",
+          "target"
         ],
         "additionalProperties": false
       }
@@ -2346,6 +2476,27 @@
                   "data": {
                     "type": "object",
                     "properties": {
+                      "payment_method": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "enum": [
+                          "Bar",
+                          "Konto",
+                          null
+                        ]
+                      },
+                      "payment_account": {
+                        "type": "string",
+                        "maxLength": 160
+                      },
+                      "cashier_subject": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
                       "name": {
                         "type": "string",
                         "minLength": 1,
@@ -2428,7 +2579,9 @@
                           "string",
                           "null"
                         ],
-                        "format": "date"
+                        "format": "date",
+                        "readOnly": true,
+                        "description": "Servicebeginn plus ein Kalendermonat; historische Fälligkeiten bleiben erhalten."
                       },
                       "payment_status": {
                         "type": "string",
@@ -3095,7 +3248,7 @@
       ],
       "patch": {
         "summary": "Zahlungsstatus eines aktuellen oder historischen Zeitraums ändern",
-        "description": "Administrator oder Mitarbeiter. Mitarbeiter dürfen keine Konten löschen.",
+        "description": "Administrator oder Mitarbeiter. Mitarbeiter dürfen keine Konten löschen. Kassierer dürfen ausschließlich eigene aktuelle offene Zeiträume auf Bezahlt setzen. Wiederholungen sind idempotent.",
         "security": [
           {
             "sessionCookie": []
@@ -5313,7 +5466,8 @@
                       "role": {
                         "enum": [
                           "admin",
-                          "employee"
+                          "employee",
+                          "cashier"
                         ]
                       }
                     },
@@ -5381,7 +5535,8 @@
                       "role": {
                         "enum": [
                           "admin",
-                          "employee"
+                          "employee",
+                          "cashier"
                         ]
                       }
                     },
@@ -6642,6 +6797,917 @@
             }
           }
         ]
+      }
+    },
+    "/activity": {
+      "post": {
+        "summary": "Benutzeraktivität aktualisieren; Hintergrundabfragen verlängern das Inaktivitätslimit nicht",
+        "description": "Administrator oder Mitarbeiter. Mitarbeiter dürfen keine Konten löschen.",
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "oidc": [
+              "openid"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Erfolgreich",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validierungsfehler",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Anmeldung erforderlich oder Token widerrufen",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Berechtigung, MFA oder CSRF fehlt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Versionskonflikt: neu laden / Vorschau aktualisieren",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Datei oder Anfrage zu groß",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Inhaltstyp nicht unterstützt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate Limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Interner Fehler",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Integrationsfehler",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Konfiguration fehlt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/cashiers": {
+      "get": {
+        "summary": "Aktive Kassierer zur Kundenzuweisung lesen",
+        "description": "Administrator oder Mitarbeiter. Mitarbeiter dürfen keine Konten löschen.",
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "oidc": [
+              "openid"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Erfolgreich",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Validierungsfehler",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Anmeldung erforderlich oder Token widerrufen",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Berechtigung, MFA oder CSRF fehlt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Versionskonflikt: neu laden / Vorschau aktualisieren",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Datei oder Anfrage zu groß",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Inhaltstyp nicht unterstützt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate Limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Interner Fehler",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Integrationsfehler",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Konfiguration fehlt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/cashier/customers": {
+      "get": {
+        "summary": "Nur eigene aktuelle offene Kunden; ausschließlich Kassierer",
+        "description": "Kassierer haben ausschließlich diesen Listenendpunkt und die Zahlungsaktion für eigene aktuelle Zeiträume. Andere Kundenendpunkte, Reports, Import und Administration sind gesperrt.",
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "oidc": [
+              "openid"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Erfolgreich",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Customer"
+                      }
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validierungsfehler",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Anmeldung erforderlich oder Token widerrufen",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Berechtigung, MFA oder CSRF fehlt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Versionskonflikt: neu laden / Vorschau aktualisieren",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Datei oder Anfrage zu groß",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Inhaltstyp nicht unterstützt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate Limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Interner Fehler",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Integrationsfehler",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Konfiguration fehlt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/backups/restore": {
+      "post": {
+        "summary": "Custom-Dump hochladen und in isolierter Datenbank prüfen; höchstens 5 Minuten alte Admin-Anmeldung",
+        "description": "Nur Administrator.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Erfolgreich",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestoreJob"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validierungsfehler",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Anmeldung erforderlich oder Token widerrufen",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Berechtigung, MFA oder CSRF fehlt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Versionskonflikt: neu laden / Vorschau aktualisieren",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Datei oder Anfrage zu groß",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Inhaltstyp nicht unterstützt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate Limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Interner Fehler",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Integrationsfehler",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Konfiguration fehlt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": ".dump, PostgreSQL Custom, maximal 50 MiB"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/backups/restore/{restore_id}": {
+      "parameters": [
+        {
+          "name": "restore_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "summary": "Upload- und Wiederherstellungsfortschritt",
+        "description": "Nur Administrator.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Erfolgreich",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestoreJob"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validierungsfehler",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Anmeldung erforderlich oder Token widerrufen",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Berechtigung, MFA oder CSRF fehlt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Versionskonflikt: neu laden / Vorschau aktualisieren",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Datei oder Anfrage zu groß",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Inhaltstyp nicht unterstützt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate Limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Interner Fehler",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Integrationsfehler",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Konfiguration fehlt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/backups/restore/{restore_id}/confirm": {
+      "parameters": [
+        {
+          "name": "restore_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "post": {
+        "summary": "Zieldatenbank ausdrücklich bestätigen; Sicherheitsbackup und atomare Wiederherstellung",
+        "description": "Nur Administrator.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "confirm": {
+                    "const": true
+                  },
+                  "target": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "confirm",
+                  "target"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Erfolgreich",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestoreJob"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validierungsfehler",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Anmeldung erforderlich oder Token widerrufen",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Berechtigung, MFA oder CSRF fehlt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nicht gefunden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Versionskonflikt: neu laden / Vorschau aktualisieren",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Datei oder Anfrage zu groß",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Inhaltstyp nicht unterstützt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate Limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Interner Fehler",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Integrationsfehler",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Konfiguration fehlt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
       }
     }
   }

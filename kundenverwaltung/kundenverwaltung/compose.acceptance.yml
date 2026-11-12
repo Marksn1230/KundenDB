@@ -1,0 +1,38 @@
+services:
+  caddy:
+    ports: !override
+      - "127.0.0.1:80:80"
+      - "127.0.0.1:443:443"
+    volumes:
+      - ./deploy/Caddyfile.test:/etc/caddy/Caddyfile:ro
+    networks:
+      default: {}
+      identity-proxy:
+        ipv4_address: 172.30.93.2
+      mfa-test:
+        ipv4_address: 93.184.216.4
+        aliases: [kundenraum.localhost]
+  mfa-allowed-client:
+    profiles: [tools]
+    image: kundenraum:workflows-test
+    entrypoint: [node]
+    environment:
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+    networks:
+      mfa-test:
+        ipv4_address: 93.184.216.2
+  mfa-denied-client:
+    profiles: [tools]
+    image: kundenraum:workflows-test
+    entrypoint: [node]
+    environment:
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+    networks:
+      mfa-test:
+        ipv4_address: 93.184.216.3
+networks:
+  mfa-test:
+    internal: true
+    ipam:
+      config:
+        - subnet: 93.184.216.0/29

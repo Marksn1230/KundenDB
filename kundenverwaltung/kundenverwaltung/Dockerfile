@@ -9,7 +9,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
-RUN npm run build && mkdir -p /app/data && chown -R node:node /app
+RUN npm run build && mkdir -p /app/data /app/backups && chown -R node:node /app/.next /app/data /app/backups
 USER node
 EXPOSE 3000
 CMD ["node","node_modules/next/dist/bin/next","start","--hostname","0.0.0.0"]

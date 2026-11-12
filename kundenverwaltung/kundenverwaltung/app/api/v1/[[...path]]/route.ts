@@ -1,15 +1,17 @@
+import {restoreAvailable,restoreTarget,uploadRestore,restoreStatus,confirmRestore} from '@/lib/restores';
+import {cashierAccounts,cashierCustomers,cashierPayment} from '@/lib/cashiers';
 import {dueCustomers} from '@/lib/due';
 import {backupAvailable,startBackup,backupStatus,downloadBackup} from '@/lib/backups';
 import {previewBulk,commitBulk} from '@/lib/bulk';
 import {countries} from '@/lib/phone';
 import { z } from 'zod';
-import { authorize, configured, rateLimit, loginAccounts, logout, manageIdentity } from '@/lib/auth';
-import { all, audit, get, run, transaction } from '@/lib/db';
+import { authorize, configured, rateLimit, loginAccounts, logout, manageIdentity, recordActivity,requireFreshAdmin } from '@/lib/auth';
+import { all, audit, get, run,withBusinessLease, businessTransaction as transaction } from '@/lib/db';
 import { createCustomer, customer, filteredCustomers, renewCustomer, reports, setPayment, updateCustomer, checkVersion } from '@/lib/customers';
 import { AppError, customerSchema, customerPatchSchema, dateSchema, fail, payments, renewalPreview, today } from '@/lib/domain';
 import { commitImport, makePreview, readImport } from '@/lib/imports';
 import { boundedBody, handle, input, json } from '@/lib/http';
-import { deliveryLog, messagePreview, saveSettings, sendTelegram, sendWhatsApp, settings, telegramPreview } from '@/lib/messages';
+import { deliveryLog, messagePreview, saveSettings, sendTelegram, sendWhatsApp, settings, telegramPreview,nextTelegramExecution } from '@/lib/messages';
 import { openapi } from '@/lib/openapi';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,10 +22,10 @@ type Context = {
 };
 const password=z.string().min(15,'Das initiale Passwort muss mindestens 15 Zeichen lang sein.').max(128,'Das Passwort darf höchstens 128 Zeichen lang sein.');
 const identityInput=z.discriminatedUnion('action',[
- z.object({action:z.literal('create'),username:z.string().trim().min(3).max(64).regex(/^[a-zA-Z0-9][a-zA-Z0-9._@-]+$/,'Ungültiger Benutzername.'),name:z.string().trim().max(100).optional(),password,role:z.enum(['admin','employee'])}).strict(),
+ z.object({action:z.literal('create'),username:z.string().trim().min(3).max(64).regex(/^[a-zA-Z0-9][a-zA-Z0-9._@-]+$/,'Ungültiger Benutzername.'),name:z.string().trim().max(100).optional(),password,role:z.enum(['admin','employee','cashier'])}).strict(),
  z.object({action:z.literal('reset'),subject:z.string().min(1).max(200),password}).strict(),
  z.object({action:z.literal('active'),subject:z.string().min(1).max(200),active:z.boolean()}).strict(),
- z.object({action:z.literal('role'),subject:z.string().min(1).max(200),role:z.enum(['admin','employee'])}).strict()
+ z.object({action:z.literal('role'),subject:z.string().min(1).max(200),role:z.enum(['admin','employee','cashier'])}).strict()
 ]);
 const filters = z.object({ q: z.string().max(200).optional(), provider: z.enum(['Art', '2GO']).optional(), assignee: z.enum(['Marko', 'Mirko', 'Satem']).optional(),
     payment_status: z.enum(payments).optional(), package_months: z.enum(['1', '6', '7', '12', '14']).optional(), year: z.string().regex(/^\d{4}$/).optional(),
@@ -55,16 +57,35 @@ async function dispatch(request: Request, context: Context) {
                 await audit('anonymous', 'security.denied', endpoint.slice(0, 200), { status: e.status });
             throw e;
         }
+        if(!['GET','HEAD','OPTIONS'].includes(method)&&!['activity','logout','backups'].includes(path[0])&&(await get<{active:number}>('SELECT active FROM maintenance WHERE id=1'))?.active)await transaction(async()=>{});
+        if(endpoint==='activity'&&method==='POST'){z.object({}).strict().parse(await input(request));await recordActivity();return json({ok:true});}
+        if(actor.role==='cashier'){
+          if(endpoint==='logout'&&method==='POST'){await logout(request);return json({ok:true});}
+          if(endpoint==='cashier/customers'&&method==='GET')return json({data:await cashierCustomers(actor)});
+          if(path.length===3&&path[0]==='customers'&&path[2]==='payment'&&method==='PATCH'){
+            const id=z.coerce.number().int().positive().parse(path[1]);
+            const b=z.object({version:z.number().int().positive(),period_id:z.number().int().positive(),payment_status:z.literal('Bezahlt')}).strict().parse(await input(request));
+            return json(await cashierPayment(actor,id,b.period_id,b.version));
+          }
+          fail('Diese Funktion ist für Kassierer gesperrt.',403);
+        }
+        if(endpoint==='cashiers'&&method==='GET')return json({data:await cashierAccounts()});
         if(path[0]==='backups'){
           if(request.headers.has('authorization'))fail('Backup-Zugriff ist ausschließlich über eine angemeldete Administratorsitzung erlaubt.',403);
-          if(endpoint==='backups'&&method==='GET')return json({available:backupAvailable(),reason:backupAvailable()?null:'Diese Umgebung verwendet SQLite. Herunterladbare PostgreSQL-Backups sind im Serverbetrieb verfügbar.'});
+          if(endpoint==='backups'&&method==='GET')return json({restore_available:restoreAvailable(),target:restoreTarget(),available:backupAvailable(),reason:backupAvailable()?null:'Diese Umgebung verwendet SQLite. Herunterladbare PostgreSQL-Backups sind im Serverbetrieb verfügbar.'});
           if(endpoint==='backups'&&method==='POST'){z.object({}).strict().parse(await input(request));await rateLimit('backup:'+actor.subject,3);return json(await startBackup(actor.subject),202);}
+          if(endpoint==='backups/restore'&&method==='POST'){
+            requireFreshAdmin(actor);await rateLimit('restore:'+actor.subject,3);
+            const bytes=await boundedBody(request,50*1024*1024+65536);const form=await new Response(bytes.buffer as ArrayBuffer,{headers:{'Content-Type':request.headers.get('content-type')||''}}).formData();const file=form.get('file');if(!(file instanceof File))fail('Backup-Datei fehlt.');return json(await uploadRestore(file,actor.subject),202);
+          }
+          if(path[1]==='restore'&&path.length===3&&method==='GET')return json(await restoreStatus(z.string().uuid().parse(path[2]),actor.subject));
+          if(path[1]==='restore'&&path.length===4&&path[3]==='confirm'&&method==='POST'){requireFreshAdmin(actor);const b=z.object({confirm:z.literal(true),target:z.string().min(1)}).strict().parse(await input(request));return json(await confirmRestore(z.string().uuid().parse(path[2]),actor.subject,b.target),202);}
           const id=z.string().uuid().parse(path[1]);
           if(path.length===2&&method==='GET')return json(await backupStatus(id,actor.subject));
           if(path.length===3&&path[2]==='download'&&method==='GET')return downloadBackup(id,actor.subject);
         }
-        if(endpoint==='bulk/preview'&&method==='POST')return json(await previewBulk(await input(request),actor.subject,actor.role==='admin'));
-        if(endpoint==='bulk/commit'&&method==='POST')return json(await commitBulk(await input(request),actor.subject,actor.role==='admin'));
+        if(endpoint==='bulk/preview'&&method==='POST')return json(await transaction(async()=>previewBulk(await input(request),actor.subject,actor.role==='admin')));
+        if(endpoint==='bulk/commit'&&method==='POST')return json(await withBusinessLease(async()=>commitBulk(await input(request),actor.subject,actor.role==='admin')));
         if (endpoint === 'logout' && method === 'POST') {
             await logout(request);
             return json({ ok: true });
@@ -121,22 +142,22 @@ async function dispatch(request: Request, context: Context) {
             return json(await readImport(file));
         }
         if (endpoint === 'imports/preview' && method === 'POST')
-            return json(await makePreview(await input(request), actor.subject));
+            return json(await transaction(async()=>makePreview(await input(request), actor.subject)));
         if (endpoint === 'imports/commit' && method === 'POST')
-            return json(await commitImport(await input(request), actor.subject));
+            return json(await transaction(async()=>commitImport(await input(request), actor.subject)));
         if (endpoint === 'settings' && method === 'GET')
-            return json({ settings: await settings(), countries, test_number: process.env.WHATSAPP_TEST_NUMBER || null, whatsapp_ready: Boolean(process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_TEMPLATE && process.env.WHATSAPP_PHONE_ID && process.env.WHATSAPP_API_VERSION), telegram_ready: Boolean(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID), identity_admin_ready: Boolean(process.env.OIDC_ADMIN_URL) });
+            return json({ settings: await settings(),next_telegram_run:await nextTelegramExecution(), countries, test_number: process.env.WHATSAPP_TEST_NUMBER || null, whatsapp_ready: Boolean(process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_TEMPLATE && process.env.WHATSAPP_PHONE_ID && process.env.WHATSAPP_API_VERSION), telegram_ready: Boolean(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID), identity_admin_ready: Boolean(process.env.OIDC_ADMIN_URL) });
         if (endpoint === 'settings' && method === 'PATCH')
             return json(await saveSettings(await input(request), actor.subject));
         if (endpoint === 'messages/preview' && method === 'GET')
             return json({ whatsapp: messagePreview(), telegram: await telegramPreview() });
         if (endpoint === 'messages/whatsapp-test' && method === 'POST') {
             await input(request);
-            return json(await sendWhatsApp(null, 'test', 0, actor.subject));
+            return json(await withBusinessLease(()=>sendWhatsApp(null, 'test', 0, actor.subject)));
         }
         if (endpoint === 'messages/telegram-test' && method === 'POST') {
             await input(request);
-            return json(await sendTelegram(true, actor.subject));
+            return json(await withBusinessLease(()=>sendTelegram(true, actor.subject)));
         }
         if (endpoint === 'deliveries' && method === 'GET')
             return json({ data: await deliveryLog() });
@@ -145,7 +166,7 @@ async function dispatch(request: Request, context: Context) {
         if (endpoint === 'users' && method === 'GET')
             return json({ data: await loginAccounts() });
         if (endpoint === 'users' && method === 'POST')
-            return json(await manageIdentity(actor, identityInput.parse(await input(request))));
+            return json(await transaction(async()=>manageIdentity(actor, identityInput.parse(await input(request)))));
         return fail('Endpunkt oder Methode nicht gefunden.', 404);
     });
 }

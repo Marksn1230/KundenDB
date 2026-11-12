@@ -45,6 +45,9 @@ export function normalizeIdentifier(raw:string,mode:'mac'|'identifier'){
 export function detectIdentifierMode(raw:string):'mac'|'identifier'{try{normalizeMac(raw);return 'mac';}catch{return 'identifier';}}
 export const normalizeName=(s:string)=>s.trim().toLocaleLowerCase('de-DE');
 export const customerSchema = z.object({
+  payment_method: z.enum(['Bar','Konto']).nullable().default(null),
+  payment_account: z.string().trim().max(160).default(''),
+  cashier_subject: z.string().min(1).max(200).nullable().default(null),
   name: z.string().trim().min(1).max(160),
   phone: z.string().trim().max(50).default(''),
   postal_code: z.string().trim().max(20).default(''), address: z.string().trim().max(500).default(''),
@@ -66,11 +69,11 @@ export const customerPatchSchema=z.record(z.string(),z.unknown()).transform(raw=
   const parsed=customerSchema.partial().parse(raw);
   return Object.fromEntries(Object.keys(raw).map(key=>[key,parsed[key as keyof CustomerInput]]));
 });
-export type Customer = CustomerInput & { id: number; customer_number: string; version: number; period_id: number; service_end: string | null; due_date: string | null; end_source: string; needs_completion: boolean; consent_at: string | null };
+export type Customer = CustomerInput & { cashier_name?:string|null; id: number; customer_number: string; version: number; period_id: number; service_end: string | null; due_date: string | null; end_source: string; needs_completion: boolean; consent_at: string | null };
 export function renewalPreview(c: Customer, start: string | undefined, months: number, now = today()) {
   const service_start = start || (c.service_end && c.service_end >= now ? c.service_end : now);
   if (!packages.includes(months as typeof packages[number])) fail('Ungültiges Paket.');
   dateSchema.parse(service_start);
   if (c.service_end && service_start < c.service_end) fail('Der neue Zeitraum darf sich nicht mit dem bisherigen überschneiden.');
-  return { service_start, service_end: addMonths(service_start, months), package_months: months, due_date: service_start };
+  return { service_start, service_end: addMonths(service_start, months), package_months: months, due_date: addMonths(service_start, 1) };
 }

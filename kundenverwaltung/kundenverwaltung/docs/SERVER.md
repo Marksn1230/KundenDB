@@ -327,3 +327,7 @@ chmod +x scripts/configure-domain.sh
 sudo ./scripts/configure-domain.sh
 sudo docker compose -f compose.server.yml up -d worker
 ```
+
+## Kundenverwaltung: neue Arbeitsabläufe
+
+[Erweiterte Installations- und Betriebsanleitung](WORKFLOWS.md): Migration vorhandener Daten, laufenden Keycloak-Realm abgleichen, 60 Minuten Inaktivität, öffentliche IP-Ausnahmen, Telegram-Zeitplanung, abgesicherte Web-Wiederherstellung und Kassiererrollen.

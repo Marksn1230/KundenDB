@@ -127,7 +127,7 @@ test('Verlängerungsvorschau laufend/abgelaufen, doppelte Freigabe und historisc
     await assert.rejects(async () => await transaction(async () => await renewCustomer(c.id, c.version, 6, '2026-11-08', 'unpaid', actor)), /inzwischen geändert/);
     await transaction(async () => await setPayment(c.id, c.period_id, 'Unbezahlt', next.version, actor));
     const r = await reports(new URLSearchParams(), '2026-03-15');
-    assert.equal(r.unpaid.find(p => p.id === c.period_id)!.full_months_overdue, 1);
+    assert.equal(r.unpaid.find(p => p.id === c.period_id)!.full_months_overdue, 0);
 });
 test('CSV/XLSX: führende Nullen, Datumswerte, serverseitige Größen- und Formelgrenzen', async () => {
     const csv = await readImport(new File(['Name;MAC;PLZ\r\nFiktiv;020000000601;00123'], 'liste.csv'));
@@ -170,9 +170,9 @@ test('WhatsApp: Produktiv aus, Test nur feste Nummer; unklare Ergebnisse und Ded
     assert.ok(changes.every(r => !String(r.changes).includes('test-only')));
 });
 test('Telegram: drei Gruppen, private Chat-ID und unabhängiger Testschalter', async () => {
-    assert.match(await telegramPreview(), /Läuft demnächst ab/);
+    assert.doesNotMatch(await telegramPreview(), /Läuft demnächst ab \(0\)/);
     assert.match(await telegramPreview(), /Läuft heute ab/);
-    assert.match(await telegramPreview(), /Seit dem letzten Bericht abgelaufen/);
+    assert.match(await telegramPreview(), /🔴 Abgelaufen/);
     process.env.TELEGRAM_BOT_TOKEN = 'test-only';
     process.env.TELEGRAM_CHAT_ID = '12345';
     let calls = 0;

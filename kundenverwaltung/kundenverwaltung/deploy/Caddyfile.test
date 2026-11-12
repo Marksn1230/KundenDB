@@ -1,0 +1,7 @@
+{
+ skip_install_trust
+}
+{$APP_DOMAIN} {
+ tls internal
+ import routes.caddy
+}

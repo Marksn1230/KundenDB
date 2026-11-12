@@ -38,3 +38,17 @@ test('Kontrollierte SQLite-v4-Übernahme nach PostgreSQL erhält Nummern, Zahlun
    assert.equal((await all('SELECT * FROM periods WHERE customer_id=?',source.id)).length,1);
  });}finally{await engine.close();}
 });
+
+test('PostgreSQL-Bestandsmigration erhält historische Fälligkeit, Rollen und Versandzeit; neue Felder bleiben unzugeordnet',async()=>{
+ const {readFileSync}=await import('node:fs');const engine=new PGlite();
+ const client:SqlClient={query:async(sql,values)=>{if(!values?.length&&sql.split(';').filter(s=>s.trim()).length>1){const r=await engine.exec(sql);return{rows:(r.at(-1)?.rows||[]) as Record<string,unknown>[],rowCount:r.at(-1)?.affectedRows||0};}const r=await engine.query(sql,values);return{rows:r.rows as Record<string,unknown>[],rowCount:r.affectedRows||0};}};
+ try{await engine.exec(readFileSync('migrations/postgres/001_initial.sql','utf8'));await engine.exec(`CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY); INSERT INTO schema_migrations VALUES(1);
+ INSERT INTO principals(subject,username,name,role) VALUES('old-admin','old','Historischer Admin','admin');
+ INSERT INTO customers(customer_number,name,name_key,mac_address) VALUES('OLD123','Bestand','bestand','Old.Account');
+ INSERT INTO periods(customer_id,service_start,service_end,package_months,payment_status,due_date) VALUES(1,'2026-01-31','2027-01-31',12,'Bezahlt','2026-02-10');
+ INSERT INTO web_sessions VALUES('old-session','old-admin','old-access',9999999999999,'old-csrf');
+ UPDATE integration_settings SET telegram_hour=17;
+ INSERT INTO deliveries(channel,dedupe_key,mode,status) VALUES('telegram','tg:2026-11-12','production','accepted');`);
+ await withPostgresClient(client,async()=>{await migrate();const row=await customer(1);assert.equal(row.customer_number,'OLD123');assert.equal(row.due_date,'2026-02-10');assert.equal(row.payment_status,'Bezahlt');assert.equal(row.payment_method,null);assert.equal(row.cashier_subject,null);const s=await get('SELECT * FROM integration_settings WHERE id=1');assert.equal(s!.telegram_hour,17);assert.equal(s!.telegram_minute,0);assert.equal(s!.telegram_second_time,null);assert.equal((await get("SELECT role FROM principals WHERE subject='old-admin'"))!.role,'admin');assert.equal((await all('SELECT * FROM web_sessions')).length,0);assert.ok(await get("SELECT id FROM deliveries WHERE dedupe_key='tg:2026-11-12:1'"));});
+ }finally{await engine.close();}
+});

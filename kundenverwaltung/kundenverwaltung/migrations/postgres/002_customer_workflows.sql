@@ -1,0 +1,15 @@
+ALTER TABLE principals DROP CONSTRAINT principals_role_check;
+ALTER TABLE principals ADD CONSTRAINT principals_role_check CHECK(role IN ('admin','employee','cashier'));
+ALTER TABLE customers ADD COLUMN payment_method TEXT CHECK(payment_method IN ('Bar','Konto'));
+ALTER TABLE customers ADD COLUMN payment_account TEXT NOT NULL DEFAULT '';
+ALTER TABLE customers ADD COLUMN cashier_subject TEXT REFERENCES principals(subject);
+ALTER TABLE integration_settings ADD COLUMN telegram_minute INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE integration_settings ADD COLUMN telegram_second_time TEXT;
+ALTER TABLE web_sessions ADD COLUMN refresh_token TEXT;
+ALTER TABLE web_sessions ADD COLUMN token_expires_at BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE web_sessions ADD COLUMN last_activity_at BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE web_sessions ADD COLUMN authenticated_at BIGINT NOT NULL DEFAULT 0;
+CREATE TABLE maintenance (id INTEGER PRIMARY KEY CHECK(id=1), active INTEGER NOT NULL DEFAULT 0);
+INSERT INTO maintenance(id) VALUES(1);
+DELETE FROM web_sessions;
+UPDATE deliveries SET dedupe_key=dedupe_key||':1' WHERE channel='telegram' AND mode='production' AND length(dedupe_key)=13 AND substr(dedupe_key,1,3)='tg:';

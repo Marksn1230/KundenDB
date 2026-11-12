@@ -40,7 +40,7 @@ export async function startBackup(owner:string){
  return publicJob(job);
  }finally{state.kundenraumBackupStarting=false;}
 }
-async function generate(job:Job,database:string){
+export async function generate(job:Job,database:string){
  try{
   const connection=new URL(database),environment:NodeJS.ProcessEnv={...process.env,PGHOST:connection.hostname.replace(/^\[|\]$/g,''),PGPORT:connection.port||'5432',PGDATABASE:decodeURIComponent(connection.pathname.slice(1)),PGUSER:decodeURIComponent(connection.username),PGPASSWORD:decodeURIComponent(connection.password),PGCONNECT_TIMEOUT:'10'};
   delete environment.PGSERVICE;delete environment.PGSERVICEFILE;
@@ -74,3 +74,15 @@ export async function downloadBackup(id:string,owner:string){
 }
 
 scheduleCleanup();void cleanupBackups().catch(()=>{});
+
+export async function safetyBackup(owner:string){
+ const directory=path.resolve(/* turbopackIgnore: true */process.env.BACKUP_DIRECTORY||'./backups');await mkdir(directory,{recursive:true,mode:0o700});
+ const id=randomUUID(),filename='before-restore-'+new Date().toISOString().replace(/[:.]/g,'-')+'.dump';
+ const job:Job={id,owner,status:'running',filename,directory,file:path.join(directory,filename),expires_at:Date.now()+lifetime};
+ // A separate temp directory keeps a failed dump from affecting retained safety backups.
+ const started=await startBackup(owner);let pending=await ownedJob(started.id,owner);
+ while(pending.status==='running'){await new Promise(resolve=>setTimeout(resolve,100));pending=await ownedJob(started.id,owner);}
+ if(pending.status!=='ready')fail('Sicherheitsbackup fehlgeschlagen; Wiederherstellung abgebrochen.',503);
+ const {copyFile}=await import('node:fs/promises');await copyFile(pending.file,job.file);await removeDirectory(pending.directory);jobs.delete(pending.id);
+ await audit(owner,'restore.safety',id,{filename});return filename;
+}

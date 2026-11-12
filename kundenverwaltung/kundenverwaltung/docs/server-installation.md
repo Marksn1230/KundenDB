@@ -1,5 +1,7 @@
 # Kundenraum: vollständige Installation auf einem neuen Server
 
+**Anwendung bereits installiert?** Verwende die [Update-Anleitung für einen laufenden Server](UPDATE.md).
+
 Ziel: vom frischen Linux-Server bis zur persönlichen Anmeldung unter einer eigenen HTTPS-Domain. Diese Anleitung gilt für **Ubuntu Server 24.04 LTS, amd64**, Bash und einen persönlichen Benutzer mit sudo-Rechten. Andere Distributionen sind hier nicht abgenommen. Empfohlen: 2 CPU-Kerne, 4 GiB RAM und mindestens 20 GiB freier Speicher für Images, Build und Daten.
 
 Repository: **https://github.com/Marksn1230/KundenDB**. Die Anwendung befindet sich unter **kundenverwaltung/kundenverwaltung**. Ausschließlich deren **compose.server.yml** verwenden; die weiteren Starterprojekte und docker-compose.yml sind nicht diese Serverinstallation.
@@ -579,3 +581,7 @@ Die lokalen Prüfskripte und Testartefakte liegen ignoriert unter `.test-data/do
 - Der konkrete Dev-Serverfehler: Ohne dessen Fehlermeldung, Installationsschritt und Quellstand lässt sich nicht feststellen, ob er mit der hier gefundenen Proxy-Konfiguration zusammenhängt.
 
 **Hinweis zu Containerlogs:** `.env not found. Continuing without it.` bei Migration/Worker ist in diesem Compose-Aufbau erwartbar. Die Datei wird nicht ins Image kopiert; Compose übergibt die Werte als Umgebungsvariablen. Maßgeblich sind Exitcode, nachfolgende Fehlermeldungen und Healthchecks.
+
+## Kundenverwaltung: neue Arbeitsabläufe
+
+[Erweiterte Installations- und Betriebsanleitung](WORKFLOWS.md): Migration vorhandener Daten, laufenden Keycloak-Realm abgleichen, 60 Minuten Inaktivität, öffentliche IP-Ausnahmen, Telegram-Zeitplanung, abgesicherte Web-Wiederherstellung und Kassiererrollen.

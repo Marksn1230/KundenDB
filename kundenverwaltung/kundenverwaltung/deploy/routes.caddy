@@ -4,7 +4,15 @@ route {
  @privateIdentity path /auth/admin* /auth/realms/master*
  respond @privateIdentity 404
  handle /auth/* {
-  reverse_proxy keycloak:8080
+  vars otp_policy force
+  import mfa-allowlist.caddy
+  reverse_proxy 172.30.93.3:8080 {
+   header_up -Forwarded
+   header_up X-Forwarded-For {remote_host}
+   header_up X-Forwarded-Host {host}
+   header_up X-Forwarded-Proto {scheme}
+   header_up X-Kundenraum-OTP-Policy {http.vars.otp_policy}
+  }
  }
  handle {
   reverse_proxy web:3000

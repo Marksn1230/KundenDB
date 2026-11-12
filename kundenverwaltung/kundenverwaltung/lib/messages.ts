@@ -1,24 +1,26 @@
+import {dueTelegramSlots,nextTelegramRun} from './telegram-schedule';
 import {phoneForWhatsApp,countries} from './phone';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { all, audit, get, run, transaction } from './db';
+import { all, audit, get, run,withBusinessLease, businessTransaction as transaction } from './db';
 import { customer, everyCustomer } from './customers';
 import { addDays, Customer, fail, today } from './domain';
 export const settingsSchema = z.object({ version: z.number().int().positive(), default_country: z.string().refine(c=>countries.some(x=>x===c),'Ungültiges Standardland.').default('AT'), whatsapp_enabled: z.boolean(), telegram_enabled: z.boolean(),
-    offsets: z.array(z.number().int().min(-365).max(365)).min(1).max(12).refine(v => new Set(v).size === v.length), upcoming_days: z.number().int().min(1).max(90), telegram_hour: z.number().int().min(0).max(23) }).strict();
+    offsets: z.array(z.number().int().min(-365).max(365)).min(1).max(12).refine(v => new Set(v).size === v.length), upcoming_days: z.number().int().min(1).max(90), telegram_hour: z.number().int().min(0).max(23), telegram_minute:z.number().int().min(0).max(59).default(0),telegram_second_time:z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullable().default(null) }).strict();
 export type Settings = z.infer<typeof settingsSchema> & {
     last_telegram_date: string | null;
 };
 export async function settings(): Promise<Settings> {
     const s = (await get<Record<string, unknown>>('SELECT * FROM integration_settings WHERE id=1'))!;
-    return { version: Number(s.version), default_country: String(s.default_country), whatsapp_enabled: Boolean(s.whatsapp_enabled), telegram_enabled: Boolean(s.telegram_enabled), offsets: JSON.parse(String(s.offsets)), upcoming_days: Number(s.upcoming_days), telegram_hour: Number(s.telegram_hour), last_telegram_date: s.last_telegram_date as string | null };
+    return { version: Number(s.version), default_country: String(s.default_country), whatsapp_enabled: Boolean(s.whatsapp_enabled), telegram_enabled: Boolean(s.telegram_enabled), offsets: JSON.parse(String(s.offsets)), upcoming_days: Number(s.upcoming_days), telegram_hour: Number(s.telegram_hour),telegram_minute:Number(s.telegram_minute),telegram_second_time:s.telegram_second_time as string|null, last_telegram_date: s.last_telegram_date as string | null };
 }
 export async function saveSettings(input: unknown, actor: string) {
     const data = settingsSchema.parse(input);
+    if(data.telegram_second_time===String(data.telegram_hour).padStart(2,'0')+':'+String(data.telegram_minute).padStart(2,'0'))fail('Die beiden Versandzeiten müssen verschieden sein.');
     return await transaction(async () => {
         if ((await settings()).version !== data.version)
             fail('Einstellungen wurden inzwischen geändert.', 409);
-        await run('UPDATE integration_settings SET whatsapp_enabled=?,telegram_enabled=?,offsets=?,upcoming_days=?,telegram_hour=?,default_country=?,version=version+1 WHERE id=1', data.whatsapp_enabled ? 1 : 0, data.telegram_enabled ? 1 : 0, JSON.stringify(data.offsets), data.upcoming_days, data.telegram_hour, data.default_country);
+        await run('UPDATE integration_settings SET whatsapp_enabled=?,telegram_enabled=?,offsets=?,upcoming_days=?,telegram_hour=?,telegram_minute=?,telegram_second_time=?,default_country=?,version=version+1 WHERE id=1', data.whatsapp_enabled ? 1 : 0, data.telegram_enabled ? 1 : 0, JSON.stringify(data.offsets), data.upcoming_days, data.telegram_hour,data.telegram_minute,data.telegram_second_time, data.default_country);
         await audit(actor, 'integrations.update', '1', data);
         return await settings();
     });
@@ -95,16 +97,16 @@ export async function sendWhatsApp(id: number | null, mode: 'test' | 'production
     }
 }
 export async function telegramPreview(now = today()) {
-    const s = await settings(), customers = await everyCustomer(), last = s.last_telegram_date || addDays(now, -1);
+    const s = await settings(), customers = await everyCustomer();
     const groups = [
-        ['Läuft demnächst ab', customers.filter(c => c.service_end && c.service_end > now && c.service_end <= addDays(now, s.upcoming_days))],
-        ['Läuft heute ab', customers.filter(c => c.service_end === now)],
-        ['Seit dem letzten Bericht abgelaufen', customers.filter(c => c.service_end && c.service_end >= last && c.service_end < now)],
+        ['📅 Läuft demnächst ab', customers.filter(c => c.service_end && c.service_end > now && c.service_end <= addDays(now, s.upcoming_days))],
+        ['⏰ Läuft heute ab', customers.filter(c => c.service_end === now)],
+        ['🔴 Abgelaufen', customers.filter(c => c.service_end && c.service_end < now)],
     ] as [
         string,
         Customer[]
     ][];
-    return `Kundenraum · ${now.split('-').reverse().join('.')}\n\n` + groups.map(([label, rows]) => label + ` (${rows.length})\n` + (rows.map(c => `${c.customer_number} · ${c.name} · ${c.provider || 'zu ergänzen'} · ${c.service_end!.split('-').reverse().join('.')}`).join('\n') || 'Keine Konten')).join('\n\n');
+    return `Kundenraum · ${now.split('-').reverse().join('.')}\n\n` + groups.filter(([,rows])=>rows.length).map(([label, rows]) => label + ` (${rows.length})\n` + (rows.map(c => `${c.customer_number} · ${c.name} · ${c.provider || 'zu ergänzen'} · ${c.service_end!.split('-').reverse().join('.')}`).join('\n') || 'Keine Konten')).join('\n\n');
 }
 function chunks(text: string, length = 3500) {
     const lines = text.split('\n'), result: string[] = [];
@@ -120,12 +122,12 @@ function chunks(text: string, length = 3500) {
         result.push(current);
     return result;
 }
-export async function sendTelegram(test = false, actor = 'scheduler', transport: Transport = fetch) {
+export async function sendTelegram(test = false, actor = 'scheduler', transport: Transport = fetch, slot='1', reference=new Date()) {
     const token = process.env.TELEGRAM_BOT_TOKEN, chat = process.env.TELEGRAM_CHAT_ID;
     if (!token || !chat || !/^\d+$/.test(chat))
         fail('Telegram benötigt Bot-Token und private positive Chat-ID.', 503);
-    const key = test ? 'tg:test:' + randomUUID() : 'tg:' + today();
-    const text = test ? 'Kundenraum · Testnachricht\nDie interne Benachrichtigung ist eingerichtet.' : await telegramPreview();
+    const key = test ? 'tg:test:' + randomUUID() : 'tg:' + today(reference)+':'+slot;
+    const text = test ? 'Kundenraum · Testnachricht\nDie interne Benachrichtigung ist eingerichtet.' : await telegramPreview(today(reference));
     const claimed = await transaction(async () => {
         if (!test && !(await settings()).telegram_enabled)
             return false;
@@ -159,7 +161,7 @@ export async function sendTelegram(test = false, actor = 'scheduler', transport:
         return { status: 'unknown' };
     }
 }
-export async function schedulerTick() {
+async function schedulerTickUnlocked() {
     // A crashed request is never automatically retried: the provider may already have accepted it.
     await run("UPDATE deliveries SET status='unknown' WHERE status='processing' AND at < ?",new Date(Date.now()-300000).toISOString());
     const s = await settings();
@@ -177,8 +179,10 @@ export async function schedulerTick() {
                     }
                 }
         }
-    const hour = Number(new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hourCycle: 'h23', timeZone: 'Europe/Vienna' }).format(new Date()));
-    if (s.telegram_enabled && hour >= s.telegram_hour)
-        await sendTelegram();
+    if(s.telegram_enabled)for(const slot of dueTelegramSlots(s))await sendTelegram(false,'scheduler',fetch,slot.id);
 }
 export const deliveryLog = async () => await all('SELECT * FROM deliveries ORDER BY id DESC LIMIT 200');
+
+export async function nextTelegramExecution(){const s=await settings();if(!s.telegram_enabled)return null;const claims=await all<{dedupe_key:string}>("SELECT dedupe_key FROM deliveries WHERE channel='telegram' AND mode='production'");return nextTelegramRun(s,new Set(claims.map(c=>c.dedupe_key)));}
+
+export async function schedulerTick(){return withBusinessLease(()=>schedulerTickUnlocked());}

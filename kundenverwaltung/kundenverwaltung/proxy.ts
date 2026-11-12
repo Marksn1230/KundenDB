@@ -8,4 +8,4 @@ export function proxy(request:NextRequest){
   if(process.env.APP_URL?.startsWith('https:'))response.headers.set('Strict-Transport-Security','max-age=31536000; includeSubDomains');
   return response;
 }
-export const config={matcher:['/','/kunden/:path*','/import','/reports','/einstellungen']};
+export const config={matcher:['/','/kunden/:path*','/import','/reports','/einstellungen','/meine-offenen-kunden']};

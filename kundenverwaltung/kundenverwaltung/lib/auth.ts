@@ -1,15 +1,17 @@
+import {sessionExpired} from './session-policy';
 import {safeReturnTo} from './return-to';
 import * as oidc from 'openid-client';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { cookies } from 'next/headers';
-import { all, audit, get, run, transaction } from './db';
+import { all, audit, get, run, sessionTransaction as transaction } from './db';
 import { fail } from './domain';
 export type Actor = {
     subject: string;
     username: string;
     name: string;
-    role: 'admin' | 'employee';
+    role: 'admin' | 'employee' | 'cashier';
     csrf?: string;
+    authenticated_at?:number;
 };
 export const configured = () => Boolean(process.env.OIDC_ISSUER && process.env.OIDC_CLIENT_ID && process.env.OIDC_CLIENT_SECRET && process.env.SESSION_ENCRYPTION_KEY && process.env.APP_URL);
 export const appUrl = () => process.env.APP_URL || 'http://localhost:3000';
@@ -85,7 +87,7 @@ async function authenticateToken(token: string): Promise<Actor> {
     const roles = (result.realm_access as {
         roles?: string[];
     } | undefined)?.roles || [];
-    const role = roles.includes('administrator') ? 'admin' : roles.includes('mitarbeiter') ? 'employee' : null;
+    const role = roles.includes('administrator') ? 'admin' : roles.includes('mitarbeiter') ? 'employee' : roles.includes('kassierer') ? 'cashier' : null;
     if (!role)
         fail('Keine Berechtigung für Kundenraum.', 403);
     if (role === 'admin' && String(result.acr) !== '2')
@@ -124,12 +126,12 @@ export async function callback(url: URL) {
     const tokens = await oidc.authorizationCodeGrant(await provider(), canonical, { pkceCodeVerifier: attempt.verifier, expectedState: state, expectedNonce: attempt.nonce });
     const actor = await authenticateToken(tokens.access_token);
     const token = randomBytes(32).toString('hex'), csrf = randomBytes(32).toString('hex');
-    const seconds = Math.min(Number(tokens.expires_in || 300), 28800);
+    const seconds = 28800;
     await run('DELETE FROM web_sessions WHERE expires_at<?', Date.now());
-    await run('INSERT INTO web_sessions(token_hash,subject,access_token,expires_at,csrf) VALUES(?,?,?,?,?)', digest(token), actor.subject, encrypt(tokens.access_token), Date.now() + seconds * 1000, csrf);
+    await run('INSERT INTO web_sessions(token_hash,subject,access_token,expires_at,csrf,refresh_token,token_expires_at,last_activity_at,authenticated_at) VALUES(?,?,?,?,?,?,?,?,?)', digest(token), actor.subject, encrypt(tokens.access_token), Date.now() + seconds * 1000, csrf,tokens.refresh_token?encrypt(tokens.refresh_token):null,Date.now()+Number(tokens.expires_in||300)*1000,Date.now(),Date.now());
     jar.set('kr_session', token, { httpOnly: true, secure: secure(), sameSite: 'strict', path: '/', maxAge: seconds });
     await audit(actor.subject, 'auth.login', actor.subject, {});
-    return safeReturnTo(attempt.return_to);
+    return actor.role==='cashier'?'/meine-offenen-kunden':safeReturnTo(attempt.return_to);
 }
 export async function authorize(request: Request, admin = false) {
     let actor: Actor;
@@ -141,16 +143,22 @@ export async function authorize(request: Request, admin = false) {
     }
     else {
         const cookie = (await cookies()).get('kr_session')?.value;
-        const session = cookie ? await get<{
-            access_token: string;
-            csrf: string;
-            expires_at: number;
-        }>('SELECT * FROM web_sessions WHERE token_hash=?', digest(cookie)) : undefined;
-        if (!session || session.expires_at <= Date.now())
-            fail('Bitte anmelden.', 401);
-        actor = { ...await authenticateToken(decrypt(session.access_token)), csrf: session.csrf };
+        actor=await transaction(async()=>{
+          const session=cookie?await get<{access_token:string;refresh_token:string|null;csrf:string;expires_at:number;last_activity_at:number;authenticated_at:number;token_expires_at:number}>('SELECT * FROM web_sessions WHERE token_hash=?',digest(cookie)):undefined;
+          if(!session||sessionExpired(session))fail('Bitte erneut anmelden.',401);
+          let access=session.access_token;
+          if(session.token_expires_at<=Date.now()+30000){
+            if(!session.refresh_token)fail('Bitte erneut anmelden.',401);
+            try{
+              const tokens=await oidc.refreshTokenGrant(await provider(),decrypt(session.refresh_token));
+              access=encrypt(tokens.access_token);
+              await run('UPDATE web_sessions SET access_token=?,refresh_token=?,token_expires_at=? WHERE token_hash=?',access,tokens.refresh_token?encrypt(tokens.refresh_token):session.refresh_token,Date.now()+Number(tokens.expires_in||300)*1000,digest(cookie!));
+            }catch{fail('Bitte erneut anmelden.',401);}
+          }
+          return {...await authenticateToken(decrypt(access)),csrf:session.csrf,authenticated_at:session.authenticated_at};
+        });
         if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
-            if (request.headers.get('origin') !== new URL(appUrl()).origin || request.headers.get('x-csrf-token') !== session.csrf) {
+            if (request.headers.get('origin') !== new URL(appUrl()).origin || request.headers.get('x-csrf-token') !== actor.csrf) {
                 await audit(actor.subject, 'security.csrf', new URL(request.url).pathname, {});
                 fail('CSRF-Prüfung fehlgeschlagen.', 403);
             }
@@ -184,13 +192,13 @@ async function adminRequest(resource: string, method: string, body?: unknown) {
     if (!response.ok) { if(response.status===409)fail('Dieser Benutzername ist bereits vergeben.',409);if(response.status===400)fail('Identitätsverwaltung: Eingaben oder Passwortvorgaben bitte prüfen.',400);fail('Die Identitätsverwaltung konnte die Aktion nicht ausführen.',502); }
     return response;
 }
-export async function manageIdentity(actor:Actor,input:{action:string;username?:string;name?:string;password?:string;role?:'admin'|'employee';subject?:string;active?:boolean}){
+export async function manageIdentity(actor:Actor,input:{action:string;username?:string;name?:string;password?:string;role?:'admin'|'employee'|'cashier';subject?:string;active?:boolean}){
  if(input.action==='create'){
    await rateLimit('create:'+actor.subject,20);
    const username=input.username!;
-   const response=await adminRequest('/users','POST',{username,firstName:input.name||username,enabled:true,requiredActions:['UPDATE_PASSWORD','CONFIGURE_TOTP'],credentials:[{type:'password',value:input.password,temporary:true}]});
+   const response=await adminRequest('/users','POST',{username,firstName:input.name||username,enabled:true,requiredActions:['UPDATE_PASSWORD'],credentials:[{type:'password',value:input.password,temporary:true}]});
    const id=response.headers.get('location')?.split('/').pop();if(!id)fail('Konto wurde angelegt; Benutzerkennung fehlt. Bitte Identitätsverwaltung prüfen.',502);
-   try{const role=await(await adminRequest('/roles/'+(input.role==='admin'?'administrator':'mitarbeiter'),'GET')).json();await adminRequest('/users/'+encodeURIComponent(id)+'/role-mappings/realm','POST',[role]);}
+   try{const role=await(await adminRequest('/roles/'+(input.role==='admin'?'administrator':input.role==='cashier'?'kassierer':'mitarbeiter'),'GET')).json();await adminRequest('/users/'+encodeURIComponent(id)+'/role-mappings/realm','POST',[role]);}
    catch(error){await adminRequest('/users/'+encodeURIComponent(id),'PUT',{enabled:false});throw error;}
    await transaction(async()=>{await run('INSERT INTO principals(subject,username,name,role) VALUES(?,?,?,?)',id,username,input.name||username,input.role!);await audit(actor.subject,'identity.create',id,{username,role:input.role,password_change_required:true});});
    return{ok:true,subject:id};
@@ -208,10 +216,14 @@ export async function manageIdentity(actor:Actor,input:{action:string;username?:
  }
  if(input.action==='active')await adminRequest('/users/'+encodeURIComponent(subject),'PUT',{enabled:input.active});
  if(input.action==='role'){
-   for(const name of ['administrator','mitarbeiter']){const role=await(await adminRequest('/roles/'+name,'GET')).json();await adminRequest('/users/'+encodeURIComponent(subject)+'/role-mappings/realm','DELETE',[role]);}
-   const role=await(await adminRequest('/roles/'+(input.role==='admin'?'administrator':'mitarbeiter'),'GET')).json();await adminRequest('/users/'+encodeURIComponent(subject)+'/role-mappings/realm','POST',[role]);
+   for(const name of ['administrator','mitarbeiter','kassierer']){const role=await(await adminRequest('/roles/'+name,'GET')).json();await adminRequest('/users/'+encodeURIComponent(subject)+'/role-mappings/realm','DELETE',[role]);}
+   const role=await(await adminRequest('/roles/'+(input.role==='admin'?'administrator':input.role==='cashier'?'kassierer':'mitarbeiter'),'GET')).json();await adminRequest('/users/'+encodeURIComponent(subject)+'/role-mappings/realm','POST',[role]);
+   if(input.role==='cashier'){const user=await(await adminRequest('/users/'+encodeURIComponent(subject),'GET')).json();await adminRequest('/users/'+encodeURIComponent(subject),'PUT',{requiredActions:(user.requiredActions||[]).filter((action:string)=>action!=='CONFIGURE_TOTP')});}
    await run('UPDATE principals SET role=? WHERE subject=?',input.role!,subject);await audit(actor.subject,'identity.role',subject,{role:input.role});
  }
  await revoke(subject,actor.subject,input.action==='active'?input.active:undefined);await adminRequest('/users/'+encodeURIComponent(subject)+'/logout','POST');return{ok:true};
 }
 export async function loginAccounts(){return all('SELECT subject,username,name,role,active FROM principals ORDER BY name');}
+
+export async function recordActivity(){const token=(await cookies()).get('kr_session')?.value;if(token)await run('UPDATE web_sessions SET last_activity_at=? WHERE token_hash=?',Date.now(),digest(token));}
+export function requireFreshAdmin(actor:Actor){if(actor.role!=='admin'||!actor.authenticated_at||Date.now()-actor.authenticated_at>5*60000)fail('Bitte für die Wiederherstellung erneut als Administrator anmelden (höchstens 5 Minuten).',403);}

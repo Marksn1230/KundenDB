@@ -68,7 +68,8 @@
         "APP_DOMAIN": "${APP_DOMAIN:?APP_DOMAIN setzen}",
         "HTTPS_ENABLED": "${HTTPS_ENABLED:-true}",
         "ACME_EMAIL": "${ACME_EMAIL:-}",
-        "ACME_ENV": "${ACME_ENV:-production}"
+        "ACME_ENV": "${ACME_ENV:-production}",
+        "KC_PROXY_TRUSTED_ADDRESSES": "172.30.93.2"
       },
       "volumes": [
         "./keycloak/kundenraum-realm.json:/opt/keycloak/data/import/kundenraum-realm.json:ro",
@@ -84,7 +85,13 @@
       "entrypoint": [
         "/bin/sh",
         "-ec"
-      ]
+      ],
+      "networks": {
+        "default": {},
+        "identity-proxy": {
+          "ipv4_address": "172.30.93.3"
+        }
+      }
     },
     "web": {
       "image": "kundenraum:${APP_VERSION:-0.4.0}",
@@ -111,13 +118,19 @@
         "APP_DOMAIN": "${APP_DOMAIN:?APP_DOMAIN setzen}",
         "HTTPS_ENABLED": "${HTTPS_ENABLED:-true}",
         "ACME_EMAIL": "${ACME_EMAIL:-}",
-        "ACME_ENV": "${ACME_ENV:-production}"
+        "ACME_ENV": "${ACME_ENV:-production}",
+        "RESTORE_DATABASE_URL": "postgresql://kundenraum:${POSTGRES_PASSWORD:?required}@restore-db:5432/kundenraum_restore",
+        "BACKUP_DIRECTORY": "/app/backups",
+        "SESSION_IDLE_SECONDS": "3600"
       },
       "expose": [
         "3000"
       ],
       "depends_on": {
         "db": {
+          "condition": "service_healthy"
+        },
+        "restore-db": {
           "condition": "service_healthy"
         }
       },
@@ -136,6 +149,13 @@
       "command": [
         "sh",
         "deploy/start-web.sh"
+      ],
+      "networks": [
+        "default",
+        "restore"
+      ],
+      "volumes": [
+        "restore-safety-backups:/app/backups"
       ]
     },
     "worker": {
@@ -194,7 +214,8 @@
         "./deploy/Caddyfile.http:/etc/caddy/Caddyfile.http:ro",
         "./deploy/routes.caddy:/etc/caddy/routes.caddy:ro",
         "./deploy/start-caddy.sh:/etc/caddy/start-caddy.sh:ro",
-        "./deploy/domain-env.sh:/etc/caddy/domain-env.sh:ro"
+        "./deploy/domain-env.sh:/etc/caddy/domain-env.sh:ro",
+        "./deploy/mfa-allowlist.caddy:/etc/caddy/mfa-allowlist.caddy:ro"
       ],
       "depends_on": [
         "web",
@@ -205,7 +226,13 @@
         "/bin/sh",
         "/etc/caddy/start-caddy.sh"
       ],
-      "command": []
+      "command": [],
+      "networks": {
+        "default": {},
+        "identity-proxy": {
+          "ipv4_address": "172.30.93.2"
+        }
+      }
     },
     "migrate": {
       "profiles": [
@@ -271,12 +298,78 @@
       "depends_on": [
         "keycloak"
       ]
+    },
+    "restore-db": {
+      "image": "postgres:17.11-alpine",
+      "environment": {
+        "POSTGRES_USER": "postgres",
+        "POSTGRES_PASSWORD": "${POSTGRES_ADMIN_PASSWORD:?required}",
+        "APP_DB_USER": "kundenraum",
+        "APP_DB_NAME": "kundenraum_restore",
+        "APP_DB_PASSWORD": "${POSTGRES_PASSWORD:?required}"
+      },
+      "volumes": [
+        "restore-db-data:/var/lib/postgresql/data",
+        "./deploy/init-database.sh:/docker-entrypoint-initdb.d/10-application.sh:ro"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD-SHELL",
+          "pg_isready -U postgres -d kundenraum_restore"
+        ],
+        "interval": "5s",
+        "timeout": "5s",
+        "retries": 30
+      },
+      "restart": "unless-stopped",
+      "networks": [
+        "restore"
+      ]
+    },
+    "identity-policy": {
+      "profiles": [
+        "tools"
+      ],
+      "image": "kundenraum:${APP_VERSION:-0.4.0}",
+      "command": [
+        "node",
+        "scripts/sync-login-policy.mjs"
+      ],
+      "environment": {
+        "APP_DOMAIN": "${APP_DOMAIN:?APP_DOMAIN setzen}",
+        "OIDC_INTERNAL_URL": "http://keycloak:8080/auth",
+        "KEYCLOAK_ADMIN_USER": "${KEYCLOAK_ADMIN_USER:-bootstrap}",
+        "KEYCLOAK_ADMIN_PASSWORD": "${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD setzen}",
+        "HTTPS_ENABLED": "${HTTPS_ENABLED:-true}",
+        "ACME_EMAIL": "${ACME_EMAIL:-}",
+        "ACME_ENV": "${ACME_ENV:-production}"
+      },
+      "depends_on": [
+        "keycloak"
+      ]
     }
   },
   "volumes": {
     "customer-db-data": {},
     "identity-db-data": {},
     "caddy-data": {},
-    "caddy-config": {}
+    "caddy-config": {},
+    "restore-db-data": {},
+    "restore-safety-backups": {}
+  },
+  "networks": {
+    "identity-proxy": {
+      "internal": true,
+      "ipam": {
+        "config": [
+          {
+            "subnet": "172.30.93.0/29"
+          }
+        ]
+      }
+    },
+    "restore": {
+      "internal": true
+    }
   }
 }

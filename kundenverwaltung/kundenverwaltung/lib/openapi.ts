@@ -1,9 +1,9 @@
 const ref=(name:string)=>({$ref:'#/components/schemas/'+name});
 const str={type:'string'}, date={type:['string','null'],format:'date'}, integer={type:'integer'};
 const status={type:'string',enum:['Bezahlt','Unbezahlt','Unbekannt']};
-const customerProperties={name:{type:'string',minLength:1,maxLength:160},mac_address:{type:'string',example:'AA:BB:CC:DD:EE:FF'},phone:{type:'string',pattern:'^$|^\\+[1-9]\\d{6,14}$'},postal_code:str,address:str,
+const customerProperties={payment_method:{type:['string','null'],enum:['Bar','Konto',null]},payment_account:{type:'string',maxLength:160},cashier_subject:{type:['string','null']},name:{type:'string',minLength:1,maxLength:160},mac_address:{type:'string',example:'AA:BB:CC:DD:EE:FF'},phone:{type:'string',pattern:'^$|^\\+[1-9]\\d{6,14}$'},postal_code:str,address:str,
   provider:{type:['string','null'],enum:['Art','2GO',null]},assignee:{type:['string','null'],enum:['Marko','Mirko','Satem',null]},points:{type:['number','null']},package_months:{type:['integer','null'],enum:[1,6,7,12,14,null]},
-  service_start:date,service_end:date,due_date:date,payment_status:status,comment:str,consent:{type:'boolean'},consent_note:str};
+  service_start:date,service_end:date,due_date:{...date,readOnly:true,description:'Servicebeginn plus ein Kalendermonat; historische Fälligkeiten bleiben erhalten.'},payment_status:status,comment:str,consent:{type:'boolean'},consent_note:str};
 const errors=Object.fromEntries([400,401,403,404,409,413,415,429,500,502,503].map(code=>[code,{description:({400:'Validierungsfehler',401:'Anmeldung erforderlich oder Token widerrufen',403:'Berechtigung, MFA oder CSRF fehlt',404:'Nicht gefunden',409:'Versionskonflikt: neu laden / Vorschau aktualisieren',413:'Datei oder Anfrage zu groß',415:'Inhaltstyp nicht unterstützt',429:'Rate Limit',500:'Interner Fehler',502:'Integrationsfehler',503:'Konfiguration fehlt'} as Record<number,string>)[code],content:{'application/json':{schema:ref('Error')}}}]));
 const body=(schema:unknown)=>({required:true,content:{'application/json':{schema}}});
 const object=(properties:Record<string,unknown>,required:string[]=Object.keys(properties))=>({type:'object',properties,required,additionalProperties:false});
@@ -111,3 +111,16 @@ importSelection.properties.approve_name={const:true,description:'Nur die vorgesc
 importSelection.properties.approve_end={type:'boolean',default:true,description:'Gültiges, tatsächlich geändertes Enddatum übernehmen. false erlaubt eine reine Namens-/Kennungsfreigabe. Fehlende oder leere Importdaten löschen kein Datum.'};
 spec.components.schemas.DuePage=object({as_of:date,through:date,group:{type:'string',enum:['expired','upcoming']},total:integer,page:integer,per_page:integer,data:array(ref('Customer'))});
 spec.paths['/customers/due']={get:{...op('Aktuelle Services: alle abgelaufenen oder heute bis einschließlich 15 Kalendertage, Europe/Vienna',ref('DuePage')),parameters:[{name:'group',in:'query',required:true,schema:{type:'string',enum:['expired','upcoming']}},{name:'page',in:'query',schema:{type:'integer',minimum:1,default:1}},{name:'per_page',in:'query',schema:{type:'integer',minimum:1,maximum:100,default:10}}]}};
+
+Object.assign(spec.components.schemas.Settings.properties,{telegram_minute:{type:'integer',minimum:0,maximum:59,default:0},telegram_second_time:{type:['string','null'],pattern:'^([01][0-9]|2[0-3]):[0-5][0-9]$',default:null}});
+for(const choice of spec.paths['/users'].post.requestBody.content['application/json'].schema.oneOf)if(choice.properties.role)choice.properties.role.enum.push('cashier');
+spec.paths['/activity']={post:op('Benutzeraktivität aktualisieren; Hintergrundabfragen verlängern das Inaktivitätslimit nicht',object({ok:{const:true}}),object({}))};
+spec.paths['/cashiers']={get:op('Aktive Kassierer zur Kundenzuweisung lesen',{})};
+spec.paths['/cashier/customers']={get:{...op('Nur eigene aktuelle offene Kunden; ausschließlich Kassierer',object({data:array(ref('Customer'))})),description:'Kassierer haben ausschließlich diesen Listenendpunkt und die Zahlungsaktion für eigene aktuelle Zeiträume. Andere Kundenendpunkte, Reports, Import und Administration sind gesperrt.'}};
+spec.paths['/customers/{id}/payment'].patch.description+=' Kassierer dürfen ausschließlich eigene aktuelle offene Zeiträume auf Bezahlt setzen. Wiederholungen sind idempotent.';
+const restoreJob=object({id:{type:'string',format:'uuid'},status:{enum:['validating','ready','restoring','complete','failed']},step:str,target:str,safety_backup:str,error:str,expires_at:{type:'string',format:'date-time'}},['id','status','step','target']);
+spec.components.schemas.RestoreJob=restoreJob;
+spec.paths['/backups/restore']={post:{...op('Custom-Dump hochladen und in isolierter Datenbank prüfen; höchstens 5 Minuten alte Admin-Anmeldung',ref('RestoreJob'),undefined,true),security:[{sessionCookie:[]}],requestBody:{required:true,content:{'multipart/form-data':{schema:object({file:{type:'string',format:'binary',description:'.dump, PostgreSQL Custom, maximal 50 MiB'}})}}},responses:{202:response(ref('RestoreJob')),...errors}}};
+const restoreId={name:'restore_id',in:'path',required:true,schema:{type:'string',format:'uuid'}};
+spec.paths['/backups/restore/{restore_id}']={parameters:[restoreId],get:{...op('Upload- und Wiederherstellungsfortschritt',ref('RestoreJob'),undefined,true),security:[{sessionCookie:[]}]}};
+spec.paths['/backups/restore/{restore_id}/confirm']={parameters:[restoreId],post:{...op('Zieldatenbank ausdrücklich bestätigen; Sicherheitsbackup und atomare Wiederherstellung',ref('RestoreJob'),object({confirm:{const:true},target:str}),true),security:[{sessionCookie:[]}],responses:{202:response(ref('RestoreJob')),...errors}}};

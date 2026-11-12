@@ -1,5 +1,7 @@
 # Kundenraum
 
+**Bereits laufender Server:** [Update von der bisherigen GitHub-Version mit Sicherung, Migration, Keycloak-Abgleich und Aktivierung](docs/UPDATE.md).
+
 [Vollständige Installation auf einem neuen Linux-Server: GitHub, PostgreSQL, HTTPS und erster Login](docs/server-installation.md).
 
 Deutschsprachige Kundenverwaltung mit Next.js 16.4.5, TypeScript, OIDC/Keycloak, gemeinsamen CSV-/XLSX-Importen, Reports und optionalen WhatsApp-/Telegram-Nachrichten. Der vorhandene Stack wurde weiterverwendet. Lokal bleiben bestehende SQLite-Daten erhalten; für den Linux-Server gibt es PostgreSQL und eine kontrollierte Übernahme. Weboberfläche und /api/v1 nutzen dieselben Geschäftsregeln.
@@ -24,7 +26,7 @@ Die Anmeldung erscheint im Kundenraum-Design unter derselben Origin /auth. Passw
 
 ## Benutzer und Rechte
 
-Einstellungen → Login-Konten → **Benutzer anlegen**: Benutzername, Rolle und initiales Passwort (mindestens 15 Zeichen). Die nächste Anmeldung verlangt ein eigenes Passwort und MFA. **Passwort neu setzen** verwendet ein temporäres Passwort und widerruft bestehende Sitzungen; OTP bleibt erhalten. Passwörter erscheinen weder in Antworten noch Auditdaten. Keine öffentliche Registrierung, kein Einladungsversand erforderlich.
+Einstellungen → Login-Konten → **Benutzer anlegen**: Benutzername, Rolle und initiales Passwort (mindestens 15 Zeichen). Die nächste Anmeldung verlangt ein eigenes Passwort; OTP gilt gemäß Rollen- und IP-Regel. **Passwort neu setzen** verwendet ein temporäres Passwort und widerruft bestehende Sitzungen; OTP bleibt erhalten. Passwörter erscheinen weder in Antworten noch Auditdaten. Keine öffentliche Registrierung, kein Einladungsversand erforderlich.
 
 | Funktion | Mitarbeiter | Administrator |
 |---|---|---|
@@ -35,11 +37,11 @@ Einstellungen → Login-Konten → **Benutzer anlegen**: Benutzername, Rolle und
 | WhatsApp-Massenversand, Integrationen, Testversand | Nein | Ja |
 | Login-Konten, Audit-/Versandprotokolle | Nein | Ja |
 
-Marko, Mirko und Satem sind Servicezuordnungen und verleihen keine Berechtigung. Jeder API-Aufruf prüft serverseitig Authentifizierung und Rolle; Administratoren benötigen MFA-ACR 2. Der mitgelieferte Realm erzwingt Passwort plus OTP für alle persönlichen Logins.
+Marko, Mirko und Satem sind Servicezuordnungen und verleihen keine Berechtigung. Jeder API-Aufruf prüft serverseitig Authentifizierung und Rolle; Administratoren benötigen MFA-ACR 2. Der mitgelieferte Realm verlangt Passwort und, außer für Kassierer oder ausdrücklich freigegebene öffentliche Proxy-IPs, OTP.
 
 ## Kunden und Import
 
-Neue Kundennummern werden serverseitig als sechs Zeichen A–Z/0–9 erzeugt, per UNIQUE gesichert und bei Kollision erneut versucht. Bestehende Nummern bleiben erhalten. Servicezeiten sind reine Kalenderdaten; Monatsende wird gekappt (31.01.2026 + 1 Monat = 28.02.2026). Importierte Enddaten bleiben bei anderen Änderungen erhalten. Verlängerungen bewahren den bisherigen Zeitraum samt Zahlungsstatus; Fälligkeit ist regulär der neue Servicebeginn.
+Neue Kundennummern werden serverseitig als sechs Zeichen A–Z/0–9 erzeugt, per UNIQUE gesichert und bei Kollision erneut versucht. Bestehende Nummern bleiben erhalten. Servicezeiten sind reine Kalenderdaten; Monatsende wird gekappt (31.01.2026 + 1 Monat = 28.02.2026). Importierte Enddaten bleiben bei anderen Änderungen erhalten. Verlängerungen bewahren den bisherigen Zeitraum samt Zahlungsstatus; Fälligkeit ist bei neuen Zeiträumen Servicebeginn plus ein Kalendermonat.
 
 Telefon akzeptiert lokale und internationale Schreibweisen. Einstellungen → Standardland steht zunächst auf AT. Eindeutige Nummern werden international gespeichert; unklare Eingaben bleiben als Stammdaten erhalten und werden vom Versand ausgeschlossen. **MAC-Format prüfen** speichert den Modus pro Kunde; ohne Prüfung bleiben freie Kennungen einschließlich Groß-/Kleinschreibung in derselben Spalte erhalten.
 
@@ -101,3 +103,7 @@ Administratoren können unter Einstellungen → Datenbank-Backup PostgreSQL-Cust
 Als Nächstes fällig enthält getrennt alle Abgelaufenen sowie heute bis einschließlich 15 Tage, sortiert und paginiert, jeweils nur den aktuellen Zeitraum. Verlängern und adminpflichtiges Löschen verwenden die bestehenden Bestätigungen. Konten ohne Datum zeigen Serviceende fehlt.
 
 Der Import benötigt nur Name und MAC-Adresse. Fehlendes/leeres Serviceende erhält bei Bestandskunden das Datum und bleibt bei neuen Kunden leer. Im Aktualisierungsmodus funktionieren eindeutige Treffer über Name oder Kennung; Datum, Name und MAC benötigen getrennte Freigaben. Serviceende erstmals setzen wird ausdrücklich angezeigt. [Aktuelle Importanleitung](docs/SERVER.md#7-gemeinsamer-csv-xlsx-import).
+
+## Aktuelle Erweiterungen
+
+[Installation und Betrieb: 60-Minuten-Sitzung, zwei Telegram-Zeiten, Backup-Wiederherstellung, IP-Ausnahmen und Kassierer](docs/WORKFLOWS.md). Die Docker-Abnahme bleibt bis zur manuellen Freigabe lokal; erst danach committen und pushen.

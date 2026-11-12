@@ -28,5 +28,5 @@ test('Bestandsmigration erhält Nummer, Stammdaten und Zahlung; entfernt Erstell
     assert.equal(cols.includes('created_at'), false);
     assert.equal(cols.includes('art_paid'), false);
     assert.equal((await all('SELECT * FROM sessions')).length, 0);
-    assert.equal(readdirSync(dir).filter(f => f.endsWith('.bak')).length, 2);
+    assert.equal(readdirSync(dir).filter(f => f.endsWith('.bak')).length, 3);
 });

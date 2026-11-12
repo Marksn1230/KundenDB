@@ -22,7 +22,7 @@
   "minimumQuickLoginWaitSeconds": 60,
   "quickLoginCheckMilliSeconds": 1000,
   "accessTokenLifespan": 900,
-  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionIdleTimeout": 3600,
   "ssoSessionMaxLifespan": 28800,
   "accessCodeLifespan": 60,
   "accessCodeLifespanUserAction": 900,
@@ -46,6 +46,10 @@
       {
         "name": "mitarbeiter",
         "description": "Kundendaten, Importe und Reports bearbeiten"
+      },
+      {
+        "name": "kassierer",
+        "description": "Nur zugewiesene aktuelle offene Zeiträume kassieren"
       }
     ]
   },
@@ -53,7 +57,7 @@
   "authenticationFlows": [
     {
       "alias": "kundenraum-mfa",
-      "description": "Verpflichtend Passwort plus OTP, ohne Cookie- oder alternative Anmeldung",
+      "description": "Passwort erforderlich; OTP außer Kassierer oder explizit freigegebener öffentlicher Proxy-IP",
       "providerId": "basic-flow",
       "topLevel": true,
       "builtIn": false,
@@ -66,11 +70,12 @@
           "userSetupAllowed": false
         },
         {
-          "authenticator": "auth-otp-form",
+          "authenticator": "auth-conditional-otp-form",
           "requirement": "REQUIRED",
           "priority": 20,
           "authenticatorFlow": false,
-          "userSetupAllowed": true
+          "userSetupAllowed": true,
+          "authenticatorConfig": "kundenraum-otp-policy"
         }
       ]
     }
@@ -81,7 +86,7 @@
       "name": "OTP einrichten",
       "providerId": "CONFIGURE_TOTP",
       "enabled": true,
-      "defaultAction": true,
+      "defaultAction": false,
       "priority": 10
     },
     {
@@ -130,7 +135,9 @@
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "${APP_URL}"
+        "post.logout.redirect.uris": "${APP_URL}",
+        "client.session.idle.timeout": "3600",
+        "client.session.max.lifespan": "28800"
       },
       "protocolMappers": [
         {
@@ -224,7 +231,9 @@
         "email"
       ],
       "attributes": {
-        "pkce.code.challenge.method": "S256"
+        "pkce.code.challenge.method": "S256",
+        "client.session.idle.timeout": "3600",
+        "client.session.max.lifespan": "28800"
       },
       "protocolMappers": [
         {
@@ -309,9 +318,22 @@
       "client": "kundenraum-web",
       "roles": [
         "administrator",
-        "mitarbeiter"
+        "mitarbeiter",
+        "kassierer"
       ]
     }
   ],
-  "loginTheme": "kundenraum"
+  "loginTheme": "kundenraum",
+  "clientSessionIdleTimeout": 3600,
+  "clientSessionMaxLifespan": 28800,
+  "authenticatorConfig": [
+    {
+      "alias": "kundenraum-otp-policy",
+      "config": {
+        "skipOtpRole": "kassierer",
+        "noOtpRequiredForHeaderPattern": "^X-Kundenraum-OTP-Policy: skip$",
+        "defaultOtpOutcome": "force"
+      }
+    }
+  ]
 }
