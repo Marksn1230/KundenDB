@@ -1,0 +1,2 @@
+CREATE TABLE security_settings (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL DEFAULT 1, addresses TEXT NOT NULL DEFAULT '[]', applied_addresses TEXT NOT NULL DEFAULT '[]', applied_version INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','queued','applying','failed')), error TEXT NOT NULL DEFAULT '', updated_by TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '');
+INSERT INTO security_settings(id) VALUES(1);

@@ -1,5 +1,6 @@
+import {securitySettings,saveSecuritySettings} from '@/lib/security-settings';
 import {restoreAvailable,restoreTarget,uploadRestore,restoreStatus,confirmRestore} from '@/lib/restores';
-import {cashierAccounts,cashierCustomers,cashierPayment} from '@/lib/cashiers';
+import {cashierAccounts,cashierCustomers,cashierPayment,cashierComment} from '@/lib/cashiers';
 import {dueCustomers} from '@/lib/due';
 import {backupAvailable,startBackup,backupStatus,downloadBackup} from '@/lib/backups';
 import {previewBulk,commitBulk} from '@/lib/bulk';
@@ -67,8 +68,10 @@ async function dispatch(request: Request, context: Context) {
             const b=z.object({version:z.number().int().positive(),period_id:z.number().int().positive(),payment_status:z.literal('Bezahlt')}).strict().parse(await input(request));
             return json(await cashierPayment(actor,id,b.period_id,b.version));
           }
+          if(path.length===4&&path[0]==='cashier'&&path[1]==='customers'&&path[3]==='comment'&&method==='PATCH'){const id=z.coerce.number().int().positive().parse(path[2]);const b=z.object({version:z.number().int().positive(),period_id:z.number().int().positive(),comment:z.string().max(10000)}).strict().parse(await input(request));return json(await cashierComment(actor,id,b.period_id,b.version,b.comment));}
           fail('Diese Funktion ist für Kassierer gesperrt.',403);
         }
+        if(endpoint==='settings/mfa'){if(request.headers.has('authorization'))fail('IP-Freigaben benötigen eine persönliche Administratorsitzung.',403);if(method==='GET')return json(await securitySettings());if(method==='PATCH'){await rateLimit('mfa-settings:'+actor.subject,12);return json(await saveSecuritySettings(await input(request),actor.subject));}}
         if(endpoint==='cashiers'&&method==='GET')return json({data:await cashierAccounts()});
         if(path[0]==='backups'){
           if(request.headers.has('authorization'))fail('Backup-Zugriff ist ausschließlich über eine angemeldete Administratorsitzung erlaubt.',403);

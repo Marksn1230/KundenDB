@@ -107,6 +107,7 @@ INSERT INTO maintenance(id) VALUES(1);
       PRAGMA user_version=5; COMMIT;`);
     }catch(error){connection.exec('ROLLBACK');throw error;}finally{connection.exec('PRAGMA foreign_keys=ON');}
   }
+  if(version<6){connection.exec('BEGIN IMMEDIATE');try{connection.exec("CREATE TABLE security_settings (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL DEFAULT 1, addresses TEXT NOT NULL DEFAULT '[]', applied_addresses TEXT NOT NULL DEFAULT '[]', applied_version INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','queued','applying','failed')), error TEXT NOT NULL DEFAULT '', updated_by TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '');\nINSERT INTO security_settings(id) VALUES(1);\nPRAGMA user_version=6; COMMIT;");}catch(error){connection.exec('ROLLBACK');throw error;}}
   globalDb.kundenDb = connection;
   return connection;
 }

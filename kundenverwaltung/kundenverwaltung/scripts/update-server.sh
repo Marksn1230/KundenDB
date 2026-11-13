@@ -109,7 +109,9 @@ check_environment() {
 }
 check_source() {
   REPO="$("${GIT[@]}" -C "$APP_DIR" rev-parse --show-toplevel)"
-  [[ -z "$("${GIT[@]}" -C "$REPO" status --porcelain --untracked-files=normal)" ]] || { fail 'Lokale Quellcodeänderungen vorhanden. Sie werden nicht überschrieben.'; return 1; }
+  local relative
+  relative="$("${GIT[@]}" -C "$APP_DIR" rev-parse --show-prefix)"
+  [[ -z "$("${GIT[@]}" -C "$REPO" status --porcelain --untracked-files=normal -- . ":(exclude)${relative}deploy/mfa-allowlist.caddy")" ]] || { fail 'Lokale Quellcodeänderungen vorhanden. Sie werden nicht überschrieben.'; return 1; }
   [[ "$("${GIT[@]}" -C "$REPO" branch --show-current)" == master ]] || { fail 'Bitte zuerst den vorgesehenen Branch master auswählen.'; return 1; }
   if [[ -z "$REMOTE" ]]; then
     if "${GIT[@]}" -C "$REPO" remote get-url origin >/dev/null 2>&1; then REMOTE=origin; else REMOTE=orgin; fi
@@ -145,6 +147,7 @@ phase() {
 snapshot() {
   local id tag
   cp -p "$APP_DIR/.env" "$STATE/server.env"
+  if [[ -f "$APP_DIR/deploy/mfa-allowlist.caddy" ]]; then cp "$APP_DIR/deploy/mfa-allowlist.caddy" "$STATE/legacy-mfa-allowlist.caddy"; fi
   sha256sum "$APP_DIR/.env" | awk '{print $1}' > "$STATE/env-sha256"
   cp "$APP_DIR/compose.server.yml" "$STATE/compose-before.yml"
   "${GIT[@]}" -C "$(cat "$STATE/repo")" archive --format=tar "$(cat "$STATE/before")" > "$STATE/source-before.tar"
@@ -167,7 +170,7 @@ source_update() {
   compose_cmd config --quiet
 }
 build_image() { compose_cmd build web; }
-stop_writers() { compose_cmd stop caddy web worker keycloak; }
+stop_writers() { compose_cmd stop caddy web worker keycloak security-controller; }
 backup_databases() {
   local service database
   # Stop again on a retry; never combine dumps made while writers ran.
@@ -185,7 +188,7 @@ backup_databases() {
   for service in db identity-db; do mv "$STATE/$service.dump.partial" "$STATE/$service.dump"; done
   (cd "$STATE" && sha256sum db.dump identity-db.dump > dumps.sha256)
 }
-start_databases() { compose_cmd up -d --wait --wait-timeout 180 db identity-db restore-db keycloak; }
+start_databases() { compose_cmd up -d --wait --wait-timeout 180 db identity-db restore-db keycloak security-controller; }
 migrate_database() { compose_cmd run --rm -T migrate; }
 sync_identity() { compose_cmd run --rm -T identity-policy; }
 verify_counts() {
@@ -193,7 +196,7 @@ verify_counts() {
   cmp "$STATE/counts-before" "$STATE/counts-after"
   (cd "$STATE" && sha256sum -c dumps.sha256)
 }
-activate() { compose_cmd up -d --wait --wait-timeout 240 web worker caddy; }
+activate() { compose_cmd up -d --wait --wait-timeout 240 --force-recreate web worker caddy; }
 verify_health() {
   compose_cmd exec -T web node -e "fetch('http://127.0.0.1:3000/api/v1/health').then(async r=>{console.log(r.status,await r.text());process.exit(r.ok?0:1)}).catch(()=>process.exit(1))"
   compose_cmd ps

@@ -1,6 +1,6 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';
 import {mkdtempSync} from 'node:fs';import {tmpdir} from 'node:os';import path from 'node:path';
-import {all,run,transaction} from '../lib/db';import {createCustomer,updateCustomer,renewCustomer,customer,reports} from '../lib/customers';import {cashierCustomers,cashierPayment} from '../lib/cashiers';import {sessionExpired,SESSION_IDLE_MS} from '../lib/session-policy';import {dueTelegramSlots,nextTelegramRun} from '../lib/telegram-schedule';import {settings,saveSettings,sendTelegram,telegramPreview} from '../lib/messages';import {approvedIP,allowlistConfig} from '../scripts/configure-mfa-ips.mjs';import {validateArchiveList} from '../lib/restores';
+import {all,run,transaction} from '../lib/db';import {createCustomer,updateCustomer,renewCustomer,customer,reports} from '../lib/customers';import {cashierCustomers,cashierPayment,cashierComment} from '../lib/cashiers';import {sessionExpired,SESSION_IDLE_MS} from '../lib/session-policy';import {dueTelegramSlots,nextTelegramRun} from '../lib/telegram-schedule';import {settings,saveSettings,sendTelegram,telegramPreview} from '../lib/messages';import {approvedIP,allowlistConfig} from '../scripts/configure-mfa-ips.mjs';import {validateArchiveList} from '../lib/restores';
 delete process.env.DATABASE_URL;process.env.DATABASE_PATH=path.join(mkdtempSync(path.join(tmpdir(),'kundenraum-workflows-')),'test.sqlite');
 const a={subject:'cashier-a',name:'Kassierer A',username:'a',role:'cashier' as const},b={...a,subject:'cashier-b',username:'b',name:'Kassierer B'};
 test('Zahlungsfälligkeit, historische Werte, Methoden und Zuweisung werden getrennt gespeichert',async()=>{
@@ -16,6 +16,11 @@ test('Zahlungsfälligkeit, historische Werte, Methoden und Zuweisung werden getr
  const report=await reports(new URLSearchParams());assert.ok(report.months.some(m=>m.month==='2027-02'&&m.unpaid===1));assert.ok(report.months.some(m=>m.month==='2028-01'&&m.expiries===1));
  await assert.rejects(()=>transaction(()=>updateCustomer(c.id,{cashier_subject:'foreign'},next.version,'admin')),/aktiven Kassierer/);
 });
+test('Kassierer-Kommentare ändern nur eigene offene Kunden, schützen Version und Zeitraum und protokollieren den Autor',async()=>{
+ const c=(await cashierCustomers(a))[0];await assert.rejects(()=>cashierComment(b,c.id,c.period_id,c.version,'Fremdzugriff'),/nicht zugewiesen/);await assert.rejects(()=>cashierComment(a,c.id,c.period_id-1,c.version,'Alt'),/nicht mehr aktuell/);
+ const result=await Promise.allSettled([cashierComment(a,c.id,c.period_id,c.version,'Rückruf vereinbart'),cashierComment(a,c.id,c.period_id,c.version,'Nicht überschreiben')]);assert.equal(result.filter(r=>r.status==='fulfilled').length,1);const updated=await customer(c.id);assert.equal(updated.comment,'Rückruf vereinbart');for(const key of ['name','phone','points','payment_status','service_start','service_end','due_date','cashier_subject'] as const)assert.equal(updated[key],c[key],key);assert.equal((await all("SELECT * FROM audit_log WHERE action='cashier.comment'")).length,1);assert.equal((await cashierComment(a,c.id,c.period_id,updated.version,updated.comment)).version,updated.version);
+});
+
 test('Zwei Kassierer: eigene aktuelle offene Kunden, atomare Zahlung, Replay und Fremdzugriff',async()=>{
  const rows=await cashierCustomers(a);assert.equal(rows.length,1);assert.equal((await cashierCustomers(b)).length,0);const c=rows[0];
  await assert.rejects(()=>cashierPayment(b,c.id,c.period_id,c.version),/nicht zugewiesen/);

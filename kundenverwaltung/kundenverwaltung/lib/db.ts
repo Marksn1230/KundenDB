@@ -54,12 +54,13 @@ export async function transaction<T>(fn:()=>T|Promise<T>,maintenanceSensitive=fa
 }
 export async function audit(actor:string,action:string,entity:string,changes:unknown){await run('INSERT INTO audit_log(actor,action,entity,changes) VALUES(?,?,?,?)',actor,action,entity,JSON.stringify(changes));}
 export async function migrate(){
-  if(backend()==='sqlite'){sqlite();return {driver:'sqlite',version:5};}
+  if(backend()==='sqlite'){sqlite();return {driver:'sqlite',version:6};}
   const sql=readFileSync(new URL('../migrations/postgres/001_initial.sql',import.meta.url),'utf8');
   return transaction(async()=>{await query('CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY)');
     if(!await get('SELECT version FROM schema_migrations WHERE version=1')){await query(sql);await run('INSERT INTO schema_migrations(version) VALUES(1)');}
     if(!await get('SELECT version FROM schema_migrations WHERE version=2')){await query(readFileSync(new URL('../migrations/postgres/002_customer_workflows.sql',import.meta.url),'utf8'));await run('INSERT INTO schema_migrations(version) VALUES(2)');}
-    return {driver:'postgres',version:2};
+    if(!await get('SELECT version FROM schema_migrations WHERE version=3')){await query(readFileSync(new URL('../migrations/postgres/003_security_settings.sql',import.meta.url),'utf8'));await run('INSERT INTO schema_migrations(version) VALUES(3)');}
+    return {driver:'postgres',version:3};
   });
 }
 /** Session-level lease keeps outbound claims committed before transport while restore waits for in-flight sends. */

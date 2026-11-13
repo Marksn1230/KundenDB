@@ -121,7 +121,8 @@
         "ACME_ENV": "${ACME_ENV:-production}",
         "RESTORE_DATABASE_URL": "postgresql://kundenraum:${POSTGRES_PASSWORD:?required}@restore-db:5432/kundenraum_restore",
         "BACKUP_DIRECTORY": "/app/backups",
-        "SESSION_IDLE_SECONDS": "3600"
+        "SESSION_IDLE_SECONDS": "3600",
+        "MFA_SETTINGS_ENABLED": "true"
       },
       "expose": [
         "3000"
@@ -215,12 +216,19 @@
         "./deploy/routes.caddy:/etc/caddy/routes.caddy:ro",
         "./deploy/start-caddy.sh:/etc/caddy/start-caddy.sh:ro",
         "./deploy/domain-env.sh:/etc/caddy/domain-env.sh:ro",
-        "./deploy/mfa-allowlist.caddy:/etc/caddy/mfa-allowlist.caddy:ro"
+        "mfa-policy:/etc/caddy/mfa:ro"
       ],
-      "depends_on": [
-        "web",
-        "keycloak"
-      ],
+      "depends_on": {
+        "web": {
+          "condition": "service_started"
+        },
+        "keycloak": {
+          "condition": "service_started"
+        },
+        "security-controller": {
+          "condition": "service_healthy"
+        }
+      },
       "restart": "unless-stopped",
       "entrypoint": [
         "/bin/sh",
@@ -347,6 +355,46 @@
       "depends_on": [
         "keycloak"
       ]
+    },
+    "security-controller": {
+      "image": "kundenraum:${APP_VERSION:-0.4.0}",
+      "command": [
+        "node",
+        "scripts/security-controller.mjs"
+      ],
+      "user": "0:0",
+      "environment": {
+        "DATABASE_URL": "${DATABASE_URL:?DATABASE_URL setzen}",
+        "MFA_POLICY_DIRECTORY": "/policy",
+        "MFA_KEYCLOAK_UPSTREAM": "172.30.93.3:8080"
+      },
+      "volumes": [
+        "mfa-policy:/policy",
+        "/var/run/docker.sock:/var/run/docker.sock"
+      ],
+      "depends_on": {
+        "db": {
+          "condition": "service_healthy"
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "node",
+          "-e",
+          "const f=require('fs');try{process.exit(Date.now()-f.statSync('/policy/heartbeat').mtimeMs<300000?0:1)}catch{process.exit(1)}"
+        ],
+        "interval": "5s",
+        "timeout": "5s",
+        "retries": 30
+      },
+      "restart": "unless-stopped",
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ]
     }
   },
   "volumes": {
@@ -355,7 +403,8 @@
     "caddy-data": {},
     "caddy-config": {},
     "restore-db-data": {},
-    "restore-safety-backups": {}
+    "restore-safety-backups": {},
+    "mfa-policy": {}
   },
   "networks": {
     "identity-proxy": {

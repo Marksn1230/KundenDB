@@ -1,3 +1,4 @@
+import {allowlistConfig} from '../lib/mfa-policy.mjs';
 import {test} from 'node:test';import assert from 'node:assert/strict';
 import {existsSync} from 'node:fs';import path from 'node:path';import {execFileSync} from 'node:child_process';
 const shell=process.env.TEST_BASH||(process.platform==='win32'?'C:/Program Files/Git/bin/bash.exe':'/bin/bash');
@@ -34,7 +35,7 @@ test('Einrichtungsablauf beendet sich bei DNS-/Abbruchfehler vor Containeränder
 // a private-path response being reordered behind a terminal reverse proxy.
 test('Caddy sperrt private Keycloak-Pfade vor dem Proxy und lässt Anmeldung sowie Anwendung durch',{skip:!existsSync(caddy)?'Caddy-Testbinary fehlt':false,timeout:30000},async t=>{
  const {createServer}=await import('node:http');
- const {mkdtempSync,writeFileSync,readFileSync,rmSync}=await import('node:fs');
+ const {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync}=await import('node:fs');
  const {tmpdir}=await import('node:os');const {spawn}=await import('node:child_process');
  const folder=mkdtempSync(path.join(tmpdir(),'kundenraum-caddy-routing-'));
  t.after(()=>rmSync(folder,{recursive:true,force:true}));
@@ -45,7 +46,7 @@ test('Caddy sperrt private Keycloak-Pfade vor dem Proxy und lässt Anmeldung sow
  const reservation=createServer();await new Promise<void>(resolve=>reservation.listen(0,'127.0.0.1',resolve));
  const port=(reservation.address() as {port:number}).port;await new Promise<void>(resolve=>reservation.close(()=>resolve()));
  const routes=readFileSync('deploy/routes.caddy','utf8').replaceAll('172.30.93.3:8080','127.0.0.1:'+upstreamPort).replaceAll('web:3000','127.0.0.1:'+upstreamPort);
- writeFileSync(path.join(folder,'routes.caddy'),routes);writeFileSync(path.join(folder,'mfa-allowlist.caddy'),'# empty allowlist\n');
+ mkdirSync(path.join(folder,'mfa'));writeFileSync(path.join(folder,'mfa/policy.caddy'),allowlistConfig([],'127.0.0.1:'+upstreamPort));writeFileSync(path.join(folder,'routes.caddy'),routes);writeFileSync(path.join(folder,'mfa-allowlist.caddy'),'# empty allowlist\n');
  writeFileSync(path.join(folder,'Caddyfile'),'{\n admin off\n auto_https off\n}\nhttp://127.0.0.1:'+port+' {\n import routes.caddy\n}\n');
  const child=spawn(caddy,['run','--config',path.join(folder,'Caddyfile'),'--adapter','caddyfile'],{windowsHide:true,stdio:'ignore'});
  t.after(async()=>{if(child.exitCode===null){child.kill();await new Promise<void>(resolve=>child.once('exit',()=>resolve()));}});

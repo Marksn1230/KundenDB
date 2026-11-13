@@ -1,6 +1,6 @@
 # Kundenverwaltung: Sitzungen, Kassierer, Telegram und Wiederherstellung
 
-Diese Erweiterung verwendet die vorhandene Anwendung im inneren Projekt `kundenverwaltung/kundenverwaltung`. Neue PostgreSQL-Migration: `002_customer_workflows.sql`; SQLite: Schema 5. Bestehende Kundennummern, Zahlungszeiträume und Fälligkeiten bleiben erhalten. Zahlungsmethode und Kassiererzuweisung beginnen bei Bestandskunden leer. Die Migration verwirft alte Anwendungssitzungen; danach erneut anmelden.
+Diese Erweiterung verwendet die vorhandene Anwendung im inneren Projekt `kundenverwaltung/kundenverwaltung`. PostgreSQL-Migrationen: `002_customer_workflows.sql` und `003_security_settings.sql`; SQLite: Schema 6. Bestehende Kundennummern, Zahlungszeiträume und Fälligkeiten bleiben erhalten. Zahlungsmethode und Kassiererzuweisung beginnen bei Bestandskunden leer. Die Migration verwirft alte Anwendungssitzungen; danach erneut anmelden.
 
 ## Bestehenden Server aktualisieren
 
@@ -29,30 +29,23 @@ Passwortanmeldung bleibt immer erforderlich. Im vorhandenen Flow `kundenraum-mfa
 
 CONFIGURE_TOTP bleibt als Required Action verfügbar, aber nicht global standardmäßig aktiv. Die Conditional-OTP-Ausführung fordert außerhalb der Ausnahmen die Einrichtung an. Beim Umstellen eines Kontos auf Kassierer entfernt die Anwendung eine noch ausstehende CONFIGURE_TOTP-Aktion. Ein bereits eingerichteter OTP-Schlüssel bleibt erhalten. Pro Login-Konto wird über die Benutzerverwaltung genau eine der drei Anwendungsrollen vergeben. Die IP-Ausnahme betrifft Administratoren und Mitarbeiter; Kassierer benötigen unabhängig von ihrer IP kein OTP. Der bestehende ACR-2-Mapper bezeichnet in dieser Installation die erfüllte verwaltete Login-Richtlinie; er ist bei einer Ausnahme kein Nachweis eines tatsächlich eingegebenen OTP.
 
-Die Datei `deploy/mfa-allowlist.caddy` ist bei Auslieferung leer. Nur einzelne öffentliche IPv4- oder IPv6-Adressen sind zulässig, keine CIDR-Netze, Hostnamen, privaten oder Dokumentationsadressen. Beispielhafte Syntax für eigene, tatsächlich kontrollierte öffentliche Adressen:
+Administrator → **Einstellungen → Sicherheit → 2FA-IP-Freigaben**. Einzelne öffentliche IPv4-/IPv6-Adressen eintragen, eine pro Zeile. Netzbereiche, Platzhalter, Hostnamen und private Adressen sind serverseitig gesperrt. Die Liste startet leer. **IP-Freigaben speichern** speichert und aktiviert geänderte Regeln automatisch. Status und aktive Adressen sind sichtbar; bei unverändertem Inhalt startet kein Container neu.
+
+Der separate `security-controller` prüft die generierte Caddy-Konfiguration mit denselben Domain-/ACME-Variablen wie der normale Start. Anschließend startet er ausschließlich Keycloak und Caddy im eigenen Compose-Projekt neu und wartet auf Bereitschaft. Fehler vor dem Neustart lassen den bisherigen Dienst laufen; bei einem fehlgeschlagenen Neustart wird die vorherige Liste wiederhergestellt und der Wiederanlauf versucht. Ergebnis und ausführender Administrator werden auditiert. Web, Worker und Datenbanken werden nicht neu gestartet. Die Seite wartet bei einer kurzen Verbindungsunterbrechung weiter auf das Ergebnis.
+
+Die Webanwendung erhält keinen Docker-Socket. Nur der getrennte Steuerungsdienst kann ihn verwenden; dieser veröffentlicht keinen Port und nimmt keine HTTP-Aufträge entgegen. Er liest ausschließlich die versionierte Datenbankliste. Das separate Konfigurationsvolume wird im Proxy schreibgeschützt eingebunden. Die automatisch erzeugten Regeln verwenden exklusive `handle`-Zweige mit einem exakten `remote_ip`-Matcher; alle anderen Anfragen erzwingen OTP. Caddy überschreibt die weitergeleiteten IP-/OTP-Header. Keycloak vertraut ausschließlich dem festgelegten Caddy-Pfad. Keine zusätzliche Proxy-/CDN-Stufe vor Caddy schalten.
+
+**Die frühere manuelle Datei `deploy/mfa-allowlist.caddy` wird nicht mehr ausgewertet.** Sie wird beim Update nur als Altdatei gesichert; alte Ausnahmen werden bewusst nicht übernommen. Anschließend in den Einstellungen neu erfassen. Bei eigenen Netzen `MFA_KEYCLOAK_UPSTREAM` im Steuerungsdienst gemeinsam mit Caddy-/Keycloak-IP und Keycloak-Proxyvertrauen anpassen.
+
+Zum Entzug die Liste in den Einstellungen leeren und speichern. Nach Status „aktiv“ verlangen neue Anmeldungen wieder OTP. Bereits angemeldete Sitzungen werden durch einen Listenwechsel nicht beendet; für deren Widerruf die Benutzerverwaltung bzw. den dokumentierten Realm-Abgleich verwenden. Kassierer bleiben rollenbedingt ohne OTP. Die IP-Liste gehört zur Server-Sicherheitskonfiguration und wird bei einem Kundenbackup-Restore nicht auf einen früheren Stand zurückgesetzt.
+
+Falls der Administrator wegen eines defekten OTP-Geräts nicht in die Oberfläche kommt, kann ein berechtigter Serveradministrator ausschließlich eine validierte eigene öffentliche IP über den vorhandenen Webcontainer zur Aktivierung vormerken:
 
 ```bash
-node scripts/configure-mfa-ips.mjs 8.8.8.8 2606:4700:4700::1111
-sudo docker compose -f compose.server.yml exec -T caddy sh -eu -c '
-  . /etc/caddy/domain-env.sh
-  configuration=/etc/caddy/Caddyfile
-  if [ "${HTTPS_ENABLED:-true}" = false ]; then configuration=/etc/caddy/Caddyfile.http; fi
-  caddy validate --config "$configuration" --adapter caddyfile
-  caddy reload --config "$configuration" --adapter caddyfile
-'
+sudo docker compose -f compose.server.yml exec -T web node --import tsx --input-type=module -e 'import {securitySettings,saveSecuritySettings} from "./lib/security-settings.ts"; const s=await securitySettings(); console.log(await saveSecuritySettings({version:s.version,addresses:process.argv.slice(1)},"server-console-recovery"));' DEINE_OEFFENTLICHE_IP
 ```
 
-Die Shell lädt vor Prüfung und Reload dieselben abgeleiteten Domain-/ACME-Variablen wie beim normalen Containerstart. Ein direktes `exec caddy caddy reload` erbt diese nur im Startprozess gesetzten Werte nicht und kann bei `dir` wegen einer leeren `ACME_DIRECTORY` scheitern. Bei fehlgeschlagener Validierung wird kein Reload ausgeführt.
-
-Die Beispieladressen sind Syntaxbeispiele und dürfen nicht als fremde Adressen freigegeben werden. Keine zusätzliche Proxy-/CDN-Stufe vor Caddy konfigurieren: Der Abgleich verwendet den tatsächlichen Socket-Absender `remote_ip`. Caddy entfernt `Forwarded` und setzt X-Forwarded-For, -Host, -Proto sowie X-Kundenraum-OTP-Policy kontrolliert neu. Selbst gesetzte Browserheader können die Ausnahme nicht aktivieren. Keycloak akzeptiert Proxyinformationen ausschließlich von Caddy unter `172.30.93.2`; Caddy kontaktiert dafür Keycloak unter `172.30.93.3`. Keycloak und Datenbanken dürfen keine öffentlichen Hostports erhalten. Bei fehlender oder unbekannter Client-IP bleibt die Policy `force`.
-
-Sofortige Aufhebung für nachfolgende Logins: Liste leeren und anschließend denselben Prüf-/Reload-Befehl von oben ausführen:
-
-```bash
-node scripts/configure-mfa-ips.mjs
-```
-
-Bereits angemeldete Sitzungen werden durch einen IP-Listenwechsel nicht beendet. Für einen sofortigen Widerruf auch bestehender Sitzungen anschließend `run --rm identity-policy` ausführen und bei Bedarf die betroffenen Anwendungssitzungen über die Benutzerverwaltung widerrufen.
+Der normale Sicherheitsdienst prüft und aktiviert auch diese Wiederherstellung; sie wird als `server-console-recovery` protokolliert. Danach erneut anmelden und die Liste in der Oberfläche kontrollieren.
 
 Technische Grundlage: [Keycloak Reverse Proxy](https://www.keycloak.org/server/reverseproxy) und [Conditional OTP in der verwendeten Version](https://github.com/keycloak/keycloak/blob/26.8.2/services/src/main/java/org/keycloak/authentication/authenticators/browser/ConditionalOtpFormAuthenticator.java). Die verwendete Version prüft bei der Headerausnahme ausdrücklich die Vertrauenswürdigkeit des Proxys.
 
@@ -111,6 +104,7 @@ npm run check
 npm run build
 npm test
 node tests/acceptance-docker.mjs
+node tests/acceptance-mfa-comments.mjs
 node tests/acceptance-security.mjs
 node tests/acceptance-scheduler.mjs
 ```
@@ -126,3 +120,9 @@ Die öffentliche Root-CA des aktuellen lokalen Teststacks liegt zusätzlich unte
 Offene Zahlungen in Reports können direkt über Als bezahlt markieren gebucht werden, einschließlich historischer Zeiträume und offener Posten ohne Fälligkeitsdatum. Die Aktion verwendet die Perioden-ID der angezeigten Zeile und die bestehende Versionsprüfung. Nach Erfolg aktualisieren sich offene Posten und Auswertungen.
 
 Die Kassiereransicht zeigt zugewiesene offene Kunden als responsive Karten mit Telefonnummer, MAC/Kennung, Adresse/PLZ, Punkten, Anbieter, Paket, Servicezuordnung, Servicebeginn/-ende, Fälligkeit, Zahlungsmethode/Konto und Kommentar. Punkte bleiben Punkte, einschließlich des Wertes 0; es wurde kein Preisfeld ergänzt. Die vorhandenen serverseitigen Rollen- und Zuweisungsprüfungen gelten unverändert. Diese Oberflächenkorrekturen benötigen keine weitere Datenbankmigration. Der Verlängerungsdialog zeigt die serverseitig berechnete Zahlungsfälligkeit.
+
+## Kassierer-Kommentare
+
+Die Kassiererkarte enthält immer ein direkt editierbares Kommentarfeld mit „Kommentar speichern“. Es bearbeitet den gemeinsamen Kundenkommentar ohne zusätzlichen Dialog. Ungespeicherte Eingaben bleiben bei Fehlern erhalten; vor einer Zahlung muss der Kommentar gespeichert werden. Der eigene Kommentar-Endpunkt prüft Rolle, aktive Zuweisung, aktuellen offenen Zeitraum und Version erneut. Fremde Kunden, bezahlte/alte Zeiträume und weitere Kundendaten sind gesperrt. Konflikte überschreiben keine zwischenzeitlichen Änderungen; Änderungen werden mit Kassierer und Zeitraum protokolliert.
+
+Die zusätzliche IPv6-/Fehlerabnahme `tests/acceptance-mfa-ipv6-failure.mjs` verwendet ausschließlich das ignorierte Overlay `.runtime/mfa-ipv6.yml` mit einem nicht gerouteten internen IPv6-Netz. Sie prüft zwei echte IPv6-Quellen, eine IPv4-Quelle, Headerfälschung, fehlgeschlagene Validierung ohne Neustart und erneute Aktivierung nach Korrektur. Das Testskript setzt am Ende die IP-Liste leer. Keine fremden öffentlichen Netze werden kontaktiert.

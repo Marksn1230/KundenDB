@@ -10,6 +10,7 @@ function fixture(){
  const root=mkdtempSync(path.join(tmpdir(),'kundenraum-updater-')),app=path.join(root,'app'),tools=path.join(root,'tools');mkdirSync(app);mkdirSync(tools);
  const git=(...args:string[])=>execFileSync('git',args,{cwd:app,encoding:'utf8',windowsHide:true,stdio:'pipe'}).trim();
  git('init','--initial-branch=master');git('config','core.autocrlf','false');git('config','user.name','Update Test');git('config','user.email','update@example.invalid');
+ mkdirSync(path.join(app,'deploy'));writeFileSync(path.join(app,'deploy/mfa-allowlist.caddy'),'# legacy empty\n');
  writeFileSync(path.join(app,'.gitignore'),'.runtime/\nbackups/\n.env\n');writeFileSync(path.join(app,'compose.server.yml'),'{}\n');writeFileSync(path.join(app,'version.txt'),'old\n');writeFileSync(path.join(app,'.env'),'FIXTURE_SECRET=must-stay\n');git('add','.');git('commit','-m','old');const before=git('rev-parse','HEAD');
  git('switch','-c','candidate');writeFileSync(path.join(app,'version.txt'),'new\n');git('add','.');git('commit','-m','new');const target=git('rev-parse','HEAD');git('update-ref','refs/remotes/origin/master',target);git('remote','add','origin','https://example.invalid/fixture');git('switch','master');
  mkdirSync(path.join(app,'.runtime'));writeFileSync(path.join(app,'.runtime','server.override.yml'),'{}\n');
@@ -49,12 +50,13 @@ if(op==='exec'){
 }
 const options={skip:!existsSync(bash)?'Bash fehlt':false,timeout:90000};
 test('Update-Skript: Shell bleibt bei Fehler offen; vorhandenes Projekt, Datenbanksicherungen und Fortschritt überstehen zwei neue Sitzungen',options,async()=>{
- const f=fixture();writeFileSync(path.join(f.root,'fail-infra'),'1');writeFileSync(path.join(f.root,'fail-policy'),'1');
+ const f=fixture();writeFileSync(path.join(f.app,'deploy/mfa-allowlist.caddy'),'# user-edited legacy list\n');writeFileSync(path.join(f.root,'fail-infra'),'1');writeFileSync(path.join(f.root,'fail-policy'),'1');
  const first=await f.shell('bash "$MOCK_SCRIPT" run; result=$?; printf "PARENT_ALIVE:%s\\n" "$result"; exit 0');assert.equal(first.code,0,first.stderr);assert.match(first.stdout,/PARENT_ALIVE:42/);
  const state=f.state();assert.equal(readFileSync(path.join(state,'status'),'utf8').trim(),'failed');assert.equal(readFileSync(path.join(state,'phase'),'utf8').trim(),'06-databases');assert.equal(f.git('rev-parse','HEAD'),f.target);assert.equal(readFileSync(path.join(f.app,'.env'),'utf8'),'FIXTURE_SECRET=must-stay\n');const dump=readFileSync(path.join(state,'db.dump'));
  const status=await f.shell('bash "$MOCK_SCRIPT" status');assert.equal(status.code,0,status.stderr);assert.match(status.stdout,/06-databases/);
  const second=await f.shell('bash "$MOCK_SCRIPT" resume; result=$?; printf "SECOND_SHELL_ALIVE:%s\\n" "$result"; exit 0');assert.equal(second.code,0,second.stderr);assert.match(second.stdout,/SECOND_SHELL_ALIVE:43/);assert.equal(readFileSync(path.join(state,'phase'),'utf8').trim(),'08-keycloak');
  const third=await f.shell('bash "$MOCK_SCRIPT" resume');assert.equal(third.code,0,third.stdout+'\n'+third.stderr);assert.equal(readFileSync(path.join(state,'status'),'utf8').trim(),'complete');assert.deepEqual(readFileSync(path.join(state,'db.dump')),dump);assert.equal(readFileSync(path.join(state,'before'),'utf8').trim(),f.before);
+ assert.equal(readFileSync(path.join(state,'legacy-mfa-allowlist.caddy'),'utf8'),'# user-edited legacy list\n');
  const calls=f.calls();assert.equal(calls.filter(a=>a.includes('pg_dump')).length,2);assert.equal(calls.filter(a=>a.includes('run')&&a.includes('migrate')).length,1);assert.equal(calls.filter(a=>a.includes('run')&&a.includes('identity-policy')).length,2);assert.ok(calls.filter(a=>a[0]==='compose'&&!a.includes('version')).every(a=>a.includes('existing_custom_project')&&a.some(s=>s.includes('server.override.yml'))));
  assert.ok(calls.every(a=>!a.some(s=>['down','prune','dropdb','systemctl'].includes(s))));
 });

@@ -9,7 +9,8 @@ WORKDIR /app
 COPY --chown=node:node package.json package-lock.json ./
 RUN npm ci
 COPY --chown=node:node . .
-RUN npm run build && mkdir -p /app/data /app/backups && chown -R node:node /app/.next /app/data /app/backups
+RUN chmod a+r package.json package-lock.json scripts/security-controller.mjs lib/mfa-policy.mjs \
+    && npm run build && mkdir -p /app/data /app/backups && chown -R node:node /app/.next /app/data /app/backups
 USER node
 RUN node -e "for(const p of ['lib/db.ts','scripts/migrate.ts','scripts/worker.ts','scripts/sync-login-policy.mjs','deploy/start-web.sh'])require('fs').accessSync(p,require('fs').constants.R_OK)"
 EXPOSE 3000

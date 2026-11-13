@@ -103,8 +103,8 @@ Ein fehlgeschlagenes `sudo -n` oder eine Vorprüfung hat dann noch keine Anwendu
 | `03-build` | Neues Web-/Workerimage bauen. Bis hier läuft die bisherige Anwendung weiter. |
 | `04-stop` | Caddy, Web, Worker und Keycloak für die Wartung anhalten. PostgreSQL und Docker selbst bleiben in Betrieb. |
 | `05-backups` | Beide Datenbanken gemeinsam im Custom-Format sichern, Archivlisten und Prüfsummen erstellen und Kunden-/Periodenzahlen festhalten. |
-| `06-databases` | Bisherige Datenbankdienste und Keycloak starten, separate neue Restore-Datenbank bereitstellen. Bestehende Volumes bleiben erhalten. |
-| `07-migration` | Anwendungsschema in einer Transaktion auf Version 2 migrieren. |
+| `06-databases` | Bisherige Datenbankdienste und Keycloak starten, separate Restore-Datenbank und Sicherheitssteuerung bereitstellen. Bestehende Volumes bleiben erhalten. |
+| `07-migration` | Anwendungsschema in einer Transaktion auf Version 3 migrieren. |
 | `08-keycloak` | Auf die Startbereitschaft warten und den vorhandenen Realm abgleichen, inklusive Kassiererrolle und 60-Minuten-Inaktivität. |
 | `09-counts` | Vor Freigabe der Schreibdienste unveränderte Kunden-/Periodenzahlen und beide Dump-Prüfsummen prüfen. |
 | `10-activate` | Web, Worker und Caddy starten und deren Bereitschaft abwarten. |
@@ -171,3 +171,7 @@ Der Updater führt **keinen automatischen Restore**, kein `dropdb`, kein `down -
 Wenn bereits die Migration versucht wurde, nicht nur alte Quelldateien über den neuen Datenbankstand kopieren. Für eine vollständige Rückkehr gehören altes Image, Konfiguration und beide Datenbanken aus demselben Sicherungszeitpunkt zusammen. Die Update-Sicherung enthält `server.env`, `source-before.tar`, `application-image.tar.gz`, `db.dump`, `identity-db.dump` und die Commit-/Projektinformationen. Eine Rücksicherung überschreibt spätere Änderungen und muss ausdrücklich geplant werden. Dein bereits angekündigter zusammengehöriger Server-Snapshot ist dafür ein eigener Rückkehrweg.
 
 Weitere fachliche Betriebsinformationen: [WORKFLOWS.md](WORKFLOWS.md). Die direkte alte `dc`-Befehlsfolge ist durch dieses Skript ersetzt.
+
+## IP-Verwaltung und Kassierer-Kommentare
+
+Dieses Update ergänzt Schema 3 (SQLite 6). Frühere manuell bearbeitete IP-Dateien werden gesichert und beim sauberen Quellcheck ausgenommen, aber nicht mehr als Loginregel ausgewertet. Die neue Liste startet leer. Danach unter Einstellungen → Sicherheit ausschließlich eigene öffentliche IPs erfassen. Speichern startet bei wirksam geänderten Regeln automatisch nur Keycloak und Caddy neu; unverändertes Speichern startet nichts. Details und der geprüfte Konsolen-Recoveryweg bei verlorenem OTP: [WORKFLOWS.md](WORKFLOWS.md). Bestehende Kunden und Kommentare bleiben erhalten; Kassierer können Kommentare direkt bei ihren eigenen offenen Kunden bearbeiten.

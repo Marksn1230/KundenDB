@@ -1,6 +1,6 @@
 import type {Actor} from './auth';
-import {all,audit,businessTransaction as transaction} from './db';
-import {customer,everyCustomer,setPayment} from './customers';
+import {all,run,audit,businessTransaction as transaction} from './db';
+import {customer,everyCustomer,setPayment,checkVersion} from './customers';
 import {fail} from './domain';
 export const cashierAccounts=()=>all<{subject:string;name:string;username:string}>("SELECT subject,name,username FROM principals WHERE role='cashier' AND active=1 ORDER BY name");
 export async function cashierCustomers(actor:Actor){return (await everyCustomer()).filter(c=>c.cashier_subject===actor.subject&&c.payment_status!=='Bezahlt');}
@@ -11,4 +11,9 @@ export async function cashierPayment(actor:Actor,id:number,periodId:number,versi
  if(c.payment_status==='Bezahlt')return c;
  const result=await setPayment(id,periodId,'Bezahlt',version,actor.subject);
  await audit(actor.subject,'cashier.payment',String(id),{period_id:periodId});return result;
+});}
+
+export async function cashierComment(actor:Actor,id:number,periodId:number,version:number,comment:string){return transaction(async()=>{
+ const c=await customer(id);if(c.cashier_subject!==actor.subject)fail('Kunde ist diesem Kassierer nicht zugewiesen.',403);if(c.period_id!==periodId||c.payment_status==='Bezahlt')fail('Dieser offene Servicezeitraum ist nicht mehr aktuell.',409);checkVersion(c,version);if(c.comment===comment)return c;
+ await run('UPDATE customers SET comment=?,version=version+1 WHERE id=?',comment,id);await audit(actor.subject,'cashier.comment',String(id),{period_id:periodId,before:c.comment,after:comment});return customer(id);
 });}

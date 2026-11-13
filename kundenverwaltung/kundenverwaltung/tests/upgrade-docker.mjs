@@ -24,9 +24,9 @@ if (!state) {
     run('git', ['-C', state.checkout, 'fetch', 'origin']);
     run('git', ['-C', state.checkout, 'checkout', '-b', 'fixture-release', 'origin/master']);
     state.fixture = path.join(state.checkout, 'kundenverwaltung/kundenverwaltung');
-    fs.copyFileSync('Dockerfile', path.join(state.fixture, 'Dockerfile'));
-    fs.copyFileSync('scripts/update-server.sh', path.join(state.fixture, 'scripts/update-server.sh'));
-    run('git', ['-C', state.checkout, 'add', 'kundenverwaltung/kundenverwaltung/Dockerfile', 'kundenverwaltung/kundenverwaltung/scripts/update-server.sh']);
+    const candidateFiles=["Dockerfile","scripts/update-server.sh","compose.server.yml","deploy/routes.caddy","lib/db.ts","lib/sqlite.ts","lib/mfa-policy.mjs","lib/security-settings.ts","lib/cashiers.ts","lib/openapi.ts","scripts/security-controller.mjs","migrations/postgres/003_security_settings.sql","app/api/v1/[[...path]]/route.ts","app/globals.css","components/cashier-view.tsx","components/security-settings.tsx","components/console.tsx"];
+    for(const file of candidateFiles){fs.copyFileSync(file,path.join(state.fixture,file));}
+    run('git',['-C',state.checkout,'add',...candidateFiles.map(file=>'kundenverwaltung/kundenverwaltung/'+file)]);
     run('git', ['-C', state.checkout, '-c', 'user.name=Upgrade Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'Fixture candidate with verified permission and update fixes']);
     const release = run('git', ['-C', state.checkout, 'rev-parse', 'HEAD']).trim();
     run('git', ['-C', state.checkout, 'update-ref', 'refs/remotes/origin/master', release]);
@@ -116,11 +116,11 @@ try {
         state.initialPassword = env.match(/^INITIAL_ADMIN_PASSWORD=(.*)$/m)[1];
         fs.writeFileSync(path.join(state.fixture, '.env'), env, { mode: 0o600 });
         fs.writeFileSync(path.join(state.fixture, '.runtime/Caddyfile.test'), '{\n skip_install_trust\n}\n{$APP_DOMAIN} {\n tls internal\n import routes.caddy\n}\n');
-        fs.writeFileSync(path.join(state.fixture, '.runtime/routes.test'), fs.readFileSync('deploy/routes.caddy', 'utf8').replaceAll('172.30.93.3', '172.30.95.3'));
+        fs.writeFileSync(path.join(state.fixture, '.runtime/routes.test'), fs.readFileSync(path.join(state.fixture,'deploy/routes.caddy'), 'utf8').replaceAll('172.30.93.3', '172.30.95.3'));
         fs.copyFileSync('deploy/mfa-allowlist.caddy', path.join(state.fixture, '.runtime/mfa.empty'));
-        fs.writeFileSync(path.join(state.fixture, '.runtime/upgrade-test.yml'), `services:\n  caddy:\n    ports: !override\n      - "127.0.0.2:80:80"\n      - "127.0.0.2:443:443"\n    volumes:\n      - ./.runtime/Caddyfile.test:/etc/caddy/Caddyfile:ro\n      - ./.runtime/routes.test:/etc/caddy/routes.caddy:ro\n      - ./.runtime/mfa.empty:/etc/caddy/mfa-allowlist.caddy:ro\n    networks:\n      default: {}\n      identity-proxy:\n        ipv4_address: 172.30.95.2\n  keycloak:\n    environment:\n      KC_PROXY_TRUSTED_ADDRESSES: 172.30.95.2\n    networks:\n      default: {}\n      identity-proxy:\n        ipv4_address: 172.30.95.3\nnetworks:\n  identity-proxy:\n    internal: true\n    ipam:\n      config: !override\n        - subnet: 172.30.95.0/29\n`);
+        fs.writeFileSync(path.join(state.fixture, '.runtime/upgrade-test.yml'), `services:\n  security-controller:\n    image: kundenraum:upgrade-e2e\n    environment:\n      MFA_KEYCLOAK_UPSTREAM: 172.30.95.3:8080\n  caddy:\n    ports: !override\n      - "127.0.0.2:80:80"\n      - "127.0.0.2:443:443"\n    volumes:\n      - ./.runtime/Caddyfile.test:/etc/caddy/Caddyfile:ro\n      - ./.runtime/routes.test:/etc/caddy/routes.caddy:ro\n      - ./.runtime/mfa.empty:/etc/caddy/mfa-allowlist.caddy:ro\n    networks:\n      default: {}\n      identity-proxy:\n        ipv4_address: 172.30.95.2\n  keycloak:\n    environment:\n      KC_PROXY_TRUSTED_ADDRESSES: 172.30.95.2\n    networks:\n      default: {}\n      identity-proxy:\n        ipv4_address: 172.30.95.3\nnetworks:\n  identity-proxy:\n    internal: true\n    ipam:\n      config: !override\n        - subnet: 172.30.95.0/29\n`);
         fs.mkdirSync(path.join(state.fixture, '.runtime/fixture-tools'));
-        fs.writeFileSync(path.join(state.fixture, '.runtime/fixture-tools/docker'), `#!/usr/bin/env bash\nif [[ " $* " == *' compose '* && " $* " == *' up '* && " $* " == *' restore-db '* && -f '${state.native}/.runtime/fail-infra' ]]; then rm '${state.native}/.runtime/fail-infra'; echo 'INJECTED: infrastructure failure' >&2; exit 73; fi\nif [[ " $* " == *' run '* && " $* " == *' identity-policy '* && -f '${state.native}/.runtime/fail-policy' ]]; then rm '${state.native}/.runtime/fail-policy'; echo 'INJECTED: policy failure' >&2; exit 74; fi\nexec /usr/local/bin/docker "$@"\n`);
+        fs.writeFileSync(path.join(state.fixture, '.runtime/fixture-tools/docker'), `#!/usr/bin/env bash\nif [[ " $* " == *' compose '* && " $* " == *' build '* ]]; then sed 's/172.30.93.3/172.30.95.3/g' '${state.native}/deploy/routes.caddy' > '${state.native}/.runtime/routes.test'; fi\nif [[ " $* " == *' compose '* && " $* " == *' up '* && " $* " == *' restore-db '* && -f '${state.native}/.runtime/fail-infra' ]]; then rm '${state.native}/.runtime/fail-infra'; echo 'INJECTED: infrastructure failure' >&2; exit 73; fi\nif [[ " $* " == *' run '* && " $* " == *' identity-policy '* && -f '${state.native}/.runtime/fail-policy' ]]; then rm '${state.native}/.runtime/fail-policy'; echo 'INJECTED: policy failure' >&2; exit 74; fi\nexec /usr/local/bin/docker "$@"\n`);
         run('docker', ['run', '-d', '--name', state.helper, '--network', 'bridge', '--mount', 'type=bind,source=' + state.checkout + ',target=' + linux(state.checkout), '--mount', 'type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock', '-e', 'PATH=' + state.native + '/.runtime/fixture-tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', '--entrypoint', 'sh', 'kundenraum-update-runner:test', '-c', 'sleep infinity']);
         run('docker', ['exec', state.helper, 'chmod', '+x', state.native + '/.runtime/fixture-tools/docker']);
         state.prepared = true;
@@ -175,7 +175,7 @@ try {
         catch { }
         const s = await waitUpdate('failed');
         assert.equal(s.phase, '08-keycloak');
-        assert.equal(sql('db', 'kundenraum', 'SELECT max(version) FROM schema_migrations'), '2');
+        assert.equal(sql('db', 'kundenraum', 'SELECT max(version) FROM schema_migrations'), '3');
         state.policyFailed = true;
         save();
         checked('Neue Sitzung setzt bis zum gezielten Keycloak-Fehler fort; Migration und Sicherungen bleiben erhalten.');
